@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.core.bootstrap import ensure_dev_admin
@@ -33,6 +34,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(api_router, prefix=settings.api_v1_prefix)
+
+# Serve uploaded files (logos)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
 @app.get("/", tags=["root"])

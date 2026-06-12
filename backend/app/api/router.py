@@ -7,6 +7,7 @@ from app.features.auth.schemas import UserCreate, UserRead, UserUpdate
 from app.features.parser.api import router as parser_router
 from app.features.proxies.api import router as proxies_router
 from app.features.inviter.api import router as inviter_router
+from app.features.settings.api import router as settings_router
 
 api_router = APIRouter()
 api_router.include_router(
@@ -29,3 +30,4 @@ api_router.include_router(accounts_router, tags=["accounts"])
 api_router.include_router(proxies_router, tags=["proxies"])
 api_router.include_router(inviter_router, tags=["inviter"])
 api_router.include_router(parser_router, tags=["parser"])
+api_router.include_router(settings_router, tags=["settings"])

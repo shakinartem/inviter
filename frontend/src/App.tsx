@@ -7,6 +7,8 @@ import AccountsPage from "@/pages/accounts";
 import ProxiesPage from "@/pages/proxies";
 import ParserPage from "@/pages/parser";
 import CampaignsPage from "@/pages/campaigns";
+import SettingsPage from "@/pages/settings";
+import HelpPage from "@/pages/help";
 import LoginPage from "@/pages/login";
 
 const queryClient = new QueryClient({
@@ -46,6 +48,8 @@ export default function App() {
             <Route path="proxies" element={<ProxiesPage />} />
             <Route path="parser" element={<ParserPage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+            <Route path="help" element={<HelpPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

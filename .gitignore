@@ -66,9 +66,15 @@ backend/alembic/versions/*.pyc
 # Backup files
 *.bak
 
+# Generated images
+ChatGPT Image*.png
+
 # Build output
 dist/
 build/
+
+# Uploads (logos, etc.)
+uploads/
 
 # TypeScript build info
 *.tsbuildinfo
