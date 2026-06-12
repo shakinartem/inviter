@@ -4,18 +4,24 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, String, Text, func
+from sqlalchemy import CheckConstraint, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
 
+SINGLETON_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
 class SiteSettings(Base):
     __tablename__ = "site_settings"
+    __table_args__ = (
+        CheckConstraint("language IN ('ru', 'en')", name="ck_site_settings_language"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        PG_UUID(as_uuid=True), primary_key=True, default=SINGLETON_ID
     )
     language: Mapped[str] = mapped_column(
         String(5), default="ru", nullable=False, comment="Interface language: ru or en"

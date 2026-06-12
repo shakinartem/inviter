@@ -75,6 +75,7 @@ build/
 
 # Uploads (logos, etc.)
 uploads/
+backend/uploads/
 
 # TypeScript build info
 *.tsbuildinfo

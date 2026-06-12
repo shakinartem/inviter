@@ -4,6 +4,7 @@ celery[redis]==5.5.3
 fastapi==0.115.12
 fastapi-users[sqlalchemy]==14.0.1
 fastapi-users-db-sqlalchemy==7.0.0
+python-multipart==0.0.20
 httpx==0.28.1
 loguru==0.7.3
 psycopg[binary]==3.2.9

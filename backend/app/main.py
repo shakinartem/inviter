@@ -9,6 +9,7 @@ from app.core.bootstrap import ensure_dev_admin
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.tasks.celery_app import celery_app
+from app.features.settings.service import BASE_UPLOAD_DIR
 
 
 @asynccontextmanager
@@ -36,7 +37,8 @@ app.add_middleware(
 app.include_router(api_router, prefix=settings.api_v1_prefix)
 
 # Serve uploaded files (logos)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+BASE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=BASE_UPLOAD_DIR), name="uploads")
 
 
 @app.get("/", tags=["root"])

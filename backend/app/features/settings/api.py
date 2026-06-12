@@ -3,10 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_active_user
+from app.core.security import get_current_active_user, get_current_superuser
 from app.db.session import get_db_session
 from app.features.auth.models import User
-from app.features.settings.schemas import LogoUploadResponse, SettingsRead, SettingsUpdate
+from app.features.settings.schemas import (
+    LogoUploadResponse,
+    SettingsRead,
+    SettingsUpdate,
+)
 from app.features.settings.service import SettingsService
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
@@ -29,7 +33,7 @@ async def get_settings(
 @router.put("/", response_model=SettingsRead)
 async def update_settings(
     payload: SettingsUpdate,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_superuser),
     service: SettingsService = Depends(get_service),
 ):
     """Update site settings."""
@@ -39,8 +43,8 @@ async def update_settings(
 
 @router.post("/logo", response_model=LogoUploadResponse)
 async def upload_logo(
-    file: UploadFile = File(..., description="Logo image (png/jpg/svg)"),
-    current_user: User = Depends(get_current_active_user),
+    file: UploadFile = File(..., description="Logo image (png/jpg/jpeg/webp)"),
+    current_user: User = Depends(get_current_superuser),
     service: SettingsService = Depends(get_service),
 ):
     """Upload and set the site logo."""
@@ -48,4 +52,17 @@ async def upload_logo(
     return LogoUploadResponse(
         logo_path=logo_path,
         message="Logo uploaded successfully",
+    )
+
+
+@router.delete("/logo", response_model=LogoUploadResponse)
+async def delete_logo(
+    current_user: User = Depends(get_current_superuser),
+    service: SettingsService = Depends(get_service),
+):
+    """Remove the site logo."""
+    await service.delete_logo()
+    return LogoUploadResponse(
+        logo_path=None,
+        message="Logo removed successfully",
     )

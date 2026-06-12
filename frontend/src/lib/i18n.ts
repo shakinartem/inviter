@@ -22,16 +22,21 @@ const translations: Record<Locale, Record<string, string>> = {
     siteName: "Название сайта",
     siteNamePlaceholder: "Введите название",
     uploadLogo: "Загрузить логотип",
+    removeLogo: "Удалить логотип",
     logoCurrent: "Текущий логотип",
     noLogo: "Логотип не загружен",
     systemSettings: "Системные настройки",
     systemSettingsHint: "JSON-конфигурация (ключ-значение)",
+    helpText: "Текст справки",
+    helpTextHint: "Markdown-разметка для страницы /help",
     save: "Сохранить",
-    saving: "Сохранение…",
+    saving: "Сохранение...",
     saved: "Настройки сохранены",
     saveError: "Ошибка сохранения",
     logoUploaded: "Логотип загружен",
+    logoRemoved: "Логотип удалён",
     logoUploadError: "Ошибка загрузки логотипа",
+    logoRemoveError: "Ошибка удаления логотипа",
 
     // Help page
     helpTitle: "Справка / Инструкция",
@@ -45,7 +50,7 @@ Inviter Pro — это самохостируемый инструмент дл�
 
 ## 2. Аккаунты
 
-Добавьте Telegram-аккаунты, загрузите .session файлы и выполните проверку.
+Добавьте Telegram-аккаунты, загрузите \`.session\` файлы и выполните проверку.
 
 ## 3. Прокси
 
@@ -53,22 +58,23 @@ Inviter Pro — это самохостируемый инструмент дл�
 
 ## 4. Парсер
 
-Спарсите участников из Telegram-групп для последующего приглашения.
+Спарсите участников из Telegram-групп для последующих приглашений.
 
 ## 5. Кампании
 
-Создайте кампании для массового приглашения. Установите лимиты и расписание.
+Создавайте кампании для массового приглашения. Указывайте лимиты и расписание.
 
 ## 6. Настройки
 
-- **Язык** — переключите интерфейс на RU или EN
-- **Логотип** — загрузите собственное изображение
+- **Язык** — переключает интерфейс между RU и EN
+- **Логотип** — загружает собственное изображение
+- **Текст справки** — markdown-контент для страницы помощи
 - **Системные настройки** — расширенная JSON-конфигурация
 
 ## 7. Безопасность
 
-- Используйте прокси для каждого аккаунта
-- Не превышайте дневные лимиты Telegram (рекомендуется до 30 инвайтов/день)
+- Используйте отдельный прокси для каждого аккаунта
+- Не превышайте дневные лимиты Telegram
 - Регулярно проверяйте статус аккаунтов
     `.trim(),
 
@@ -76,7 +82,7 @@ Inviter Pro — это самохостируемый инструмент дл�
     welcome: "Добро пожаловать в Inviter Pro",
 
     // Common
-    loading: "Загрузка…",
+    loading: "Загрузка...",
     error: "Ошибка",
     retry: "Повторить",
   },
@@ -97,21 +103,26 @@ Inviter Pro — это самохостируемый инструмент дл�
     settingsTitle: "Settings",
     settingsSubtitle: "Manage language, logo and system settings",
     language: "Interface language",
-    languageRu: "Русский",
+    languageRu: "Russian",
     languageEn: "English",
     siteName: "Site name",
     siteNamePlaceholder: "Enter site name",
     uploadLogo: "Upload logo",
+    removeLogo: "Remove logo",
     logoCurrent: "Current logo",
     noLogo: "No logo uploaded",
     systemSettings: "System settings",
     systemSettingsHint: "JSON configuration (key-value)",
+    helpText: "Help text",
+    helpTextHint: "Markdown content for the /help page",
     save: "Save",
-    saving: "Saving…",
+    saving: "Saving...",
     saved: "Settings saved",
     saveError: "Save error",
     logoUploaded: "Logo uploaded",
+    logoRemoved: "Logo removed",
     logoUploadError: "Logo upload error",
+    logoRemoveError: "Logo removal error",
 
     // Help page
     helpTitle: "Help / Instructions",
@@ -125,7 +136,7 @@ Inviter Pro is a self-hosted tool for automating Telegram group invitations.
 
 ## 2. Accounts
 
-Add Telegram accounts, upload .session files and run the check.
+Add Telegram accounts, upload \`.session\` files and run the check.
 
 ## 3. Proxies
 
@@ -143,12 +154,13 @@ Create campaigns for mass invitations. Set limits and schedules.
 
 - **Language** — switch the interface between RU and EN
 - **Logo** — upload your own image
+- **Help text** — markdown content for the help page
 - **System settings** — advanced JSON configuration
 
 ## 7. Security
 
 - Use a proxy for each account
-- Do not exceed daily Telegram limits (recommended up to 30 invites/day)
+- Do not exceed daily Telegram limits
 - Regularly check account status
     `.trim(),
 
@@ -156,7 +168,7 @@ Create campaigns for mass invitations. Set limits and schedules.
     welcome: "Welcome to Inviter Pro",
 
     // Common
-    loading: "Loading…",
+    loading: "Loading...",
     error: "Error",
     retry: "Retry",
   },

@@ -1,19 +1,10 @@
+import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
-import { cn } from "@/lib/utils";
-import { t, getLocale, setLocale, type Locale } from "@/lib/i18n";
-import {
-  LayoutDashboard,
-  Users,
-  Shield,
-  Search,
-  Send,
-  Settings,
-  HelpCircle,
-  LogOut,
-  Globe,
-} from "lucide-react";
-import { useState, useEffect } from "react";
+import { Globe, HelpCircle, LayoutDashboard, LogOut, Search, Send, Settings, Shield, Users } from "lucide-react";
+
 import { apiClient } from "@/lib/api-client";
+import { getLocale, setLocale, t, type Locale } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api/v1";
 
@@ -32,9 +23,7 @@ function NavItems() {
         className={({ isActive }) =>
           cn(
             "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-            isActive
-              ? "bg-ink text-white"
-              : "text-muted hover:bg-stone-100 hover:text-ink",
+            isActive ? "bg-ink text-white" : "text-muted hover:bg-stone-100 hover:text-ink",
           )
         }
       >
@@ -46,9 +35,7 @@ function NavItems() {
         className={({ isActive }) =>
           cn(
             "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-            isActive
-              ? "bg-ink text-white"
-              : "text-muted hover:bg-stone-100 hover:text-ink",
+            isActive ? "bg-ink text-white" : "text-muted hover:bg-stone-100 hover:text-ink",
           )
         }
       >
@@ -60,9 +47,7 @@ function NavItems() {
         className={({ isActive }) =>
           cn(
             "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-            isActive
-              ? "bg-ink text-white"
-              : "text-muted hover:bg-stone-100 hover:text-ink",
+            isActive ? "bg-ink text-white" : "text-muted hover:bg-stone-100 hover:text-ink",
           )
         }
       >
@@ -74,9 +59,7 @@ function NavItems() {
         className={({ isActive }) =>
           cn(
             "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-            isActive
-              ? "bg-ink text-white"
-              : "text-muted hover:bg-stone-100 hover:text-ink",
+            isActive ? "bg-ink text-white" : "text-muted hover:bg-stone-100 hover:text-ink",
           )
         }
       >
@@ -88,9 +71,7 @@ function NavItems() {
         className={({ isActive }) =>
           cn(
             "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-            isActive
-              ? "bg-ink text-white"
-              : "text-muted hover:bg-stone-100 hover:text-ink",
+            isActive ? "bg-ink text-white" : "text-muted hover:bg-stone-100 hover:text-ink",
           )
         }
       >
@@ -102,9 +83,7 @@ function NavItems() {
         className={({ isActive }) =>
           cn(
             "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-            isActive
-              ? "bg-ink text-white"
-              : "text-muted hover:bg-stone-100 hover:text-ink",
+            isActive ? "bg-ink text-white" : "text-muted hover:bg-stone-100 hover:text-ink",
           )
         }
       >
@@ -116,9 +95,7 @@ function NavItems() {
         className={({ isActive }) =>
           cn(
             "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-            isActive
-              ? "bg-ink text-white"
-              : "text-muted hover:bg-stone-100 hover:text-ink",
+            isActive ? "bg-ink text-white" : "text-muted hover:bg-stone-100 hover:text-ink",
           )
         }
       >
@@ -132,7 +109,6 @@ function NavItems() {
 export function Sidebar() {
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [locale, setLocaleState] = useState<Locale>(getLocale());
-  const [, setRenderKey] = useState(0);
 
   useEffect(() => {
     apiClient
@@ -145,8 +121,6 @@ export function Sidebar() {
     const next: Locale = locale === "ru" ? "en" : "ru";
     setLocale(next);
     setLocaleState(next);
-    setRenderKey((k) => k + 1);
-    // Force re-render to update all labels
     window.location.reload();
   };
 
@@ -159,7 +133,6 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-full w-60 flex-col border-r border-black/5 bg-white/80 backdrop-blur-sm">
-      {/* Logo */}
       <div className="flex h-14 items-center gap-2 border-b border-black/5 px-5">
         {settings?.logo_path ? (
           <img
@@ -177,19 +150,17 @@ export function Sidebar() {
         </span>
       </div>
 
-      {/* Navigation */}
       <nav className="flex-1 space-y-1 p-3">
         <NavItems />
       </nav>
 
-      {/* Footer: language toggle + logout */}
       <div className="space-y-1 border-t border-black/5 p-3">
         <button
           onClick={handleToggleLocale}
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-stone-100 hover:text-ink"
         >
           <Globe className="h-4 w-4" />
-          {locale === "ru" ? "English" : "Русский"}
+          {locale === "ru" ? "EN" : "RU"}
         </button>
         <button
           onClick={handleLogout}
