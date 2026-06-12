@@ -1,0 +1,74 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+backend/.venv/
+
+# Python cache and build
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environment files
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Telegram sessions
+*.session
+*.session-journal
+sessions/
+backend/sessions/*
+!backend/sessions/.gitkeep
+
+# Celery
+celerybeat-schedule
+backend/celerybeat-schedule
+
+# Logs
+logs/
+*.log
+
+# Node.js
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+
+# IDEs and OS
+.idea/
+.vscode/
+.DS_Store
+
+# Sensitive configs
+proxy.txt
+proxies.txt
+accounts.txt
+secrets.json
+config.local.json
+
+# Alembic compiled versions
+backend/alembic/versions/*.pyc
+
+# Backup files
+*.bak
+
+# Build output
+dist/
+build/
+
+# TypeScript build info
+*.tsbuildinfo
