@@ -1,34 +1,127 @@
-# Inviter
+# Inviter Pro
 
-Self-hosted Telegram inviter with accounts, proxies, campaigns, parser and admin settings.
+**Self-hosted Telegram inviter** — система для автоматизации приглашений в Telegram-группы с поддержкой множества аккаунтов, прокси, кампаний, парсинга участников и административных настроек.
 
-## Settings
+Стек: Python (FastAPI) + PostgreSQL + Redis + Celery + React (TypeScript) + Tailwind CSS + Docker
 
-- `GET /api/v1/settings/` returns the singleton site settings row and creates it on first access.
-- `PUT /api/v1/settings/` updates site name, language, help text and system config.
-- `POST /api/v1/settings/logo` uploads the site logo.
-- `DELETE /api/v1/settings/logo` removes the current logo.
+---
 
-## Branding
+## О проекте
 
-- Logo files are stored under `backend/uploads/logo/` at runtime.
-- The backend serves uploaded files from `/uploads`.
-- Logo uploads are limited to PNG, JPG, JPEG and WEBP files with a 5 MB maximum size.
-- Logo changes are restricted to authenticated superusers.
+Inviter Pro — это полноценная платформа для массового приглашения пользователей в Telegram-группы/каналы. Позволяет:
 
-## Language
+- Управлять десятками Telegram-аккаунтов с разными прокси
+- Импортировать и проверять прокси (SOCKS5, HTTP, MTProto, Local Adapter)
+- Создавать кампании с гибкими настройками (задержки, лимиты, warmup, чёрные списки)
+- Парсить участников из групп для последующего приглашения
+- Работать через веб-интерфейс с русским и английским языком
 
-- The UI supports `ru` and `en`.
-- The selected locale is persisted in `localStorage`.
-- The sidebar language switcher reloads the app so translated labels refresh immediately.
+---
 
-## Help
+## ✅ Что уже реализовано
 
-- The `/help` page renders markdown from `help_text` if it is configured in settings.
-- If no help text is stored, the frontend falls back to bundled translations.
-- Raw HTML is escaped before rendering.
+### Бэкенд (FastAPI)
 
-## Deployment
+| Компонент | Статус | Описание |
+|-----------|--------|----------|
+| **Прокси** | ✅ Полностью | CRUD, импорт MTProto/SOCKS5/HTTP, проверка TCP, скоринг, bulk-тесты, кэширование в Redis |
+| **Кандидаты прокси** | ✅ Полностью | Импорт → проверка → аппрув → reject → удаление, маскировка секретов |
+| **Аккаунты** | ✅ Полностью | CRUD, загрузка .session, проверка get_me(), 7 статусов, метрики, bulk-операции, cooldown/ban |
+| **Кампании (инвайтинг)** | ✅ API + модель | InviteCampaign/InviteTask/InviteLog, задержки, warmup, чёрные списки, лимиты, логи |
+| **Платформы** | ✅ Архитектура | 8 платформ (Telegram активен, остальные — заглушки), PlatformRegistry, адаптеры |
+| **Парсер** | 🟡 Базовая модель | ParsedChat с parsed_users (JSON), но без интеграции с кампаниями |
+| **Настройки сайта** | ✅ Полностью | Singleton-модель, API, загрузка/удаление логотипа |
+| **Аутентификация** | ✅ Полностью | JWT, регистрация, superuser, FastAPI Users |
+| **MTProto парсер** | ✅ Полностью | Парсинг всех форматов ссылок, валидация |
+| **Celery** | 🟡 Частично | Базовая задача run_campaign создана, реальный воркер не отлажен |
 
-- `docker-compose.yml` mounts a persistent `uploads_data` volume for backend uploads.
-- `backend/uploads/` is ignored by git to prevent committing generated files.
+### Фронтенд (React + TypeScript)
+
+| Страница | Статус | Описание |
+|----------|--------|----------|
+| Dashboard | ✅ | Статистика: аккаунты, прокси, парсер, кампании, графики |
+| Accounts | ✅ | Таблица, создание, загрузка .session, проверка, удаление |
+| Proxies | ✅ | Список, фильтры, тест, bulk-операции |
+| MTProto Import | ✅ | Импорт ссылок, проверка, аппрув кандидатов |
+| Platforms | ✅ | Список платформ с возможностями |
+| Parser | 🟡 | Базовая страница, требует доработки |
+| Campaigns | 🟡 | Таблица, создание, без детального просмотра кампании |
+| Settings | ✅ | Язык, логотип, название сайта, системные настройки |
+| Help | ✅ | Markdown-справка (из настроек или встроенная) |
+| Login | ✅ | Форма входа |
+| **Layout** | ✅ | Сайдбар с логотипом, переключатель языка RU/EN, выход |
+| **i18n** | ✅ | Полный словарь ru/en |
+
+### Инфраструктура
+
+- ✅ Docker Compose (PostgreSQL, Redis, Backend, Frontend, Celery Worker)
+- ✅ Dockerfile для backend и frontend
+- ✅ Alembic миграции
+- ✅ Redis для кэширования
+- ✅ Vite + Tailwind CSS
+
+---
+
+## 🟡 Что реализовано частично / требует доработки
+
+| Задача | Статус | Описание |
+|--------|--------|----------|
+| **Дублирование Campaign моделей** | 🟡 | Есть `Campaign` (старая) и `InviteCampaign` (новая). Нужно объединить |
+| **`_get_target_users()` возвращает хардкод** | 🟡 | Метод возвращает 5 тестовых пользователей вместо реальных из ParsedChat |
+| **Парсер → Кампании** | 🟡 | Нет связи между спарсенными участниками и задачами кампании |
+| **Celery-воркер** | 🟡 | Реальная фоновая обработка кампаний не отлажена |
+| **Тесты** | 🟡 | Тесты только для MTProto парсера, прокси и платформ |
+| **UI парсера** | 🟡 | Базовая страница без отображения прогресса и списка участников |
+| **Детальный просмотр кампании** | 🟡 | Нет страницы с задачами, логами, статистикой в реальном времени |
+
+---
+
+## 📋 Что надо реализовать (приоритеты)
+
+### Приоритет 1 — Критическое (без этого не работает)
+
+- [ ] **Объединить `Campaign` и `InviteCampaign`** — удалить дубль, оставить единую модель
+- [ ] **Реализовать `_get_target_users()`** — получать реальных пользователей из `ParsedChat.parsed_users` по source_chat_id
+- [ ] **Связать парсер с кампаниями** — после парсинга группы автоматически создавать InviteTask для выбранной кампании
+
+### Приоритет 2 — Важное
+
+- [ ] **API для parsed_chats** — CRUD, эндпоинт привязки к кампании, создание InviteTask из parsed_users
+- [ ] **Написать тесты** — для аккаунтов, кампаний, парсера, настроек
+- [ ] **Детальная страница кампании** — со списком задач (InviteTask), логами (InviteLog), статистикой, кнопками Start/Pause/Stop
+- [ ] **Доработать Celery-воркер** — реальная обработка задач, мониторинг прогресса
+
+### Приоритет 3 — Улучшение UX
+
+- [ ] **Batch-импорт пользователей** — загрузка списка user_id/username из файла или текста
+- [ ] **Улучшить UI парсера** — прогресс парсинга, список спарсенных с возможностью выбора
+- [ ] **Health monitoring прокси** — фоновая проверка с уведомлениями
+- [ ] **Proxy rotate/fallback** — автоматическая смена прокси при падении
+- [ ] **Планировщик кампаний** — запуск по расписанию
+- [ ] **Экспорт статистики** — CSV/PDF отчёты по кампаниям
+
+---
+
+## Быстрый старт
+
+```bash
+# Клонировать
+git clone https://github.com/shakinartem/inviter.git
+cd inviter
+
+# Запустить через Docker
+docker-compose up -d
+
+# Или вручную (см. ЗАПУСК.txt)
+```
+
+## Запуск тестов
+
+```bash
+cd backend
+python -m pytest tests/ -v
+```
+
+## Лицензия
+
+MIT
