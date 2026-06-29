@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -151,6 +151,7 @@ class InviteTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     __table_args__ = (
+        UniqueConstraint("campaign_id", "target_user_id", name="uq_invite_tasks_campaign_target_user"),
     )
 
     def __repr__(self) -> str:

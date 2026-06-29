@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import type { ParsedChatListItem, ParsedChatResponse, ParserSearchPayload, ParserStats } from "@/types";
+import type { ParsedChatListItem, ParsedChatResponse, ParsedUserResponse, ParserSearchPayload, ParserStats } from "@/types";
 
 export function useParsedChats(params?: {
   source?: string;
@@ -38,6 +38,38 @@ export function useParseSearch() {
       return data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["parsed-chats"] }),
+  });
+}
+
+export function useCreateMockParsedUsers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: {
+      title: string;
+      count: number;
+      username_prefix: string;
+      include_bots?: boolean;
+      include_scam?: boolean;
+      include_fake?: boolean;
+    }) => {
+      const { data } = await apiClient.post<ParsedChatResponse>("/parser/mock-users", payload);
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["parsed-chats"] });
+      qc.invalidateQueries({ queryKey: ["parser-stats"] });
+    },
+  });
+}
+
+export function useParsedUsers(chatId: string | undefined) {
+  return useQuery({
+    queryKey: ["parsed-users", chatId],
+    queryFn: async () => {
+      const { data } = await apiClient.get<{ items: ParsedUserResponse[]; total: number }>(`/parser/chats/${chatId}/users`);
+      return data;
+    },
+    enabled: !!chatId,
   });
 }
 

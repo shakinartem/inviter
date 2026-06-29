@@ -19,6 +19,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse, Response
 from loguru import logger
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
@@ -26,14 +27,18 @@ from app.core.security import get_current_active_user as current_user
 from app.features.parser.models import ParsedChat as ParsedChatModel
 from app.features.parser.schemas import (
     BulkParseRequest,
+    MockParsedUsersCreate,
     ParsedChatCreate,
     ParsedChatListItem,
     ParsedChatListResponse,
     ParsedChatResponse,
+    ParsedUserListResponse,
+    ParsedUserResponse,
     ParserSearchRequest,
     ParserStats,
 )
 from app.features.parser.service import ParserService
+from app.features.parser.models import ParsedUser
 
 # ==================== Router ====================
 
@@ -176,6 +181,31 @@ async def create_chat(
     return ParsedChatResponse.model_validate(saved[0])
 
 
+@router.post(
+    "/mock-users",
+    response_model=ParsedChatResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create mock ParsedChat and ParsedUser records",
+)
+async def create_mock_users(
+    payload: MockParsedUsersCreate,
+    user: Any = Depends(current_user),
+    parser_service: ParserService = Depends(get_parser_service),
+    db_session: AsyncSession = Depends(get_db_session),
+) -> ParsedChatResponse:
+    chat = await parser_service.create_mock_parsed_users(
+        owner_id=user.id,
+        db_session=db_session,
+        title=payload.title,
+        count=payload.count,
+        username_prefix=payload.username_prefix,
+        include_bots=payload.include_bots,
+        include_scam=payload.include_scam,
+        include_fake=payload.include_fake,
+    )
+    return ParsedChatResponse.model_validate(chat)
+
+
 # ==================== GET /chats ====================
 
 
@@ -262,6 +292,48 @@ async def get_chat(
         )
 
     return ParsedChatResponse.model_validate(chat)
+
+
+@router.get(
+    "/chats/{chat_id}/users",
+    response_model=ParsedUserListResponse,
+    summary="Parsed users for a chat",
+)
+async def list_chat_users(
+    chat_id: UUID,
+    user: Any = Depends(current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> ParsedUserListResponse:
+    chat_result = await db_session.execute(
+        select(ParsedChatModel.id).where(
+            ParsedChatModel.id == chat_id,
+            ParsedChatModel.owner_id == user.id,
+        )
+    )
+    if not chat_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat not found",
+        )
+
+    total_result = await db_session.execute(
+        select(func.count(ParsedUser.id)).where(ParsedUser.chat_id == chat_id)
+    )
+    users_result = await db_session.execute(
+        select(ParsedUser)
+        .where(ParsedUser.chat_id == chat_id)
+        .order_by(ParsedUser.created_at.asc())
+        .offset(skip)
+        .limit(limit)
+    )
+    return ParsedUserListResponse(
+        items=[ParsedUserResponse.model_validate(item) for item in users_result.scalars().all()],
+        total=total_result.scalar() or 0,
+        skip=skip,
+        limit=limit,
+    )
 
 
 # ==================== DELETE /chats/{id} ====================

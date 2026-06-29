@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import type { InviteCampaignListItem, InviteCampaignResponse, CampaignCreatePayload, CampaignStats, InviteTaskResponse } from "@/types";
+import type { InviteCampaignListItem, InviteCampaignResponse, CampaignCreatePayload, CampaignStats, InviteTaskResponse, InviteLogResponse } from "@/types";
 
 export function useCampaigns(params?: { status?: string; skip?: number; limit?: number }) {
   return useQuery({
@@ -47,6 +47,18 @@ export function useCampaignTasks(id: string | undefined) {
   });
 }
 
+export function useCampaignLogs(id: string | undefined) {
+  return useQuery({
+    queryKey: ["campaign-logs", id],
+    queryFn: async () => {
+      const { data } = await apiClient.get<InviteLogResponse[]>(`/campaigns/${id}/logs`);
+      return data;
+    },
+    enabled: !!id,
+    refetchInterval: 10_000,
+  });
+}
+
 export function useCreateCampaign() {
   const qc = useQueryClient();
   return useMutation({
@@ -68,6 +80,9 @@ export function useStartCampaign() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["campaigns"] });
       qc.invalidateQueries({ queryKey: ["campaign"] });
+      qc.invalidateQueries({ queryKey: ["campaign-tasks"] });
+      qc.invalidateQueries({ queryKey: ["campaign-stats"] });
+      qc.invalidateQueries({ queryKey: ["campaign-logs"] });
     },
   });
 }

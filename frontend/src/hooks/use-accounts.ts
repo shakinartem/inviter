@@ -51,6 +51,27 @@ export function useCreateAccount() {
   });
 }
 
+export function useUpdateAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      payload,
+    }: {
+      id: string;
+      payload: Partial<AccountCreatePayload> & { is_active?: boolean };
+    }) => {
+      const { data } = await apiClient.patch<AccountResponse>(`/accounts/${id}`, payload);
+      return data;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["account", vars.id] });
+      qc.invalidateQueries({ queryKey: ["account-stats"] });
+    },
+  });
+}
+
 export function useUpdateAccountStatus() {
   const qc = useQueryClient();
   return useMutation({

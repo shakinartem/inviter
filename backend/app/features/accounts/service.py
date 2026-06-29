@@ -19,7 +19,9 @@ from app.features.accounts.schemas import (
     AccountStatusUpdate,
     AccountUpdate,
 )
+from app.core.config import settings
 from app.features.proxies.models import Proxy
+from app.features.settings.models import SINGLETON_ID, SiteSettings
 
 
 # Дневной лимит по умолчанию (если кампания не указала)
@@ -263,11 +265,43 @@ class AccountService:
         if not account:
             raise ValueError(f"Account {account_id} not found")
 
+        if settings.telegram_mock_mode:
+            mock_id = abs(hash(str(account.id))) % 9_000_000_000 + 1_000_000_000
+            username = f"mock_{str(account.id).replace('-', '')[:10]}"
+            result = {
+                "is_authorized": True,
+                "status": "active",
+                "status_message": "Telegram Mock Mode: account check succeeded",
+                "telegram_user_id": mock_id,
+                "username": username,
+                "first_name": account.label or "Mock",
+                "last_name": "User",
+                "is_premium": False,
+                "is_bot": False,
+            }
+            account.telegram_user_id = mock_id
+            account.username = username
+            account.first_name = result["first_name"]
+            account.last_name = result["last_name"]
+            account.is_premium = False
+            account.is_bot = False
+            account.status = "active"
+            account.status_message = result["status_message"]
+            account.last_checked_at = datetime.now(timezone.utc)
+            account.last_seen_at = datetime.now(timezone.utc)
+            account.banned_until = None
+            account.cooldown_until = None
+            await self.session.commit()
+            await self.session.refresh(account)
+            return result
+
         if not self.client_manager.session_exists(account.session_name):
             raise FileNotFoundError(
                 f"Session file not found for {account.session_name}. "
                 "Upload it first."
             )
+
+        await self._apply_effective_telegram_credentials(account)
 
         proxy = None
         if account.proxy_id:
@@ -618,6 +652,35 @@ class AccountService:
         )
         return result.scalar_one_or_none()
 
+    async def _apply_effective_telegram_credentials(self, account: Account) -> None:
+        if account.api_id and account.api_hash:
+            return
+
+        result = await self.session.execute(
+            select(SiteSettings).where(SiteSettings.id == SINGLETON_ID)
+        )
+        site_settings = result.scalar_one_or_none()
+        telegram_api = (
+            (site_settings.system_config or {}).get("telegram_api")
+            if site_settings
+            else None
+        )
+        if not telegram_api:
+            raise ValueError(
+                "Telegram API credentials are not configured. Set them in Settings -> Telegram API "
+                "or provide account-level api_id/api_hash."
+            )
+
+        api_id = telegram_api.get("api_id")
+        api_hash = telegram_api.get("api_hash")
+        if not api_id or not api_hash:
+            raise ValueError(
+                "Telegram API credentials are incomplete. Set api_id and api_hash in Settings -> Telegram API."
+            )
+
+        account.api_id = int(api_id)
+        account.api_hash = str(api_hash)
+
     # ==================== Client helpers ====================
 
     async def get_or_create_client(self, account_id: UUID):
@@ -629,6 +692,8 @@ class AccountService:
         account = await self.get_account(account_id)
         if not account:
             raise ValueError(f"Account {account_id} not found")
+
+        await self._apply_effective_telegram_credentials(account)
 
         proxy = None
         if account.proxy_id:

@@ -50,6 +50,13 @@ TG_PROTO_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+OFFICIAL_BLOCK_PATTERN = re.compile(
+    r"Server:\s*(?P<host>[^\s\r\n]+)\s+"
+    r"Port:\s*(?P<port>\d{1,5})\s+"
+    r"Secret:\s*(?P<secret>[0-9a-fA-F]+)",
+    re.IGNORECASE,
+)
+
 
 def parse_mtproto_url(url: str) -> ParsedMtprotoItem | None:
     """Распарсить одну MTProto-ссылку.
@@ -154,17 +161,37 @@ def parse_mtproto_text(text: str) -> MtprotoParseResult:
     """
     result = MtprotoParseResult()
     urls = find_mtproto_urls(text)
+    seen: set[tuple[str, int, str]] = set()
 
     for url in urls:
         item = parse_mtproto_url(url)
         if item is None:
             continue
         if item.is_valid:
-            result.items.append(item)
+            key = normalize_mtproto_item(item)
+            if key not in seen:
+                seen.add(key)
+                result.items.append(item)
         else:
             result.errors.append(
                 f"Invalid proxy in '{url[:80]}': {item.error_message}"
             )
+
+    for match in OFFICIAL_BLOCK_PATTERN.finditer(text):
+        host = match.group("host").strip()
+        port = int(match.group("port"))
+        secret = match.group("secret").strip()
+        raw = match.group(0)
+        if not (1 <= port <= 65535):
+            result.errors.append(
+                f"Invalid proxy in '{raw[:80]}': Port out of range (1-65535): {port}"
+            )
+            continue
+        item = ParsedMtprotoItem(host=host, port=port, secret=secret, raw_url=raw)
+        key = normalize_mtproto_item(item)
+        if key not in seen:
+            seen.add(key)
+            result.items.append(item)
 
     return result
 

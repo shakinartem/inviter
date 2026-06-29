@@ -278,9 +278,9 @@ class InviteCampaignList(BaseModel):
     status: Literal["draft", "active", "paused", "completed", "failed"]
     target_chat_title: Optional[str]
     target_chat_username: Optional[str]
-    tasks_count: int
-    completed_tasks_count: int
-    success_rate: float
+    tasks_count: int = 0
+    completed_tasks_count: int = 0
+    success_rate: float = 0.0
     created_at: datetime
     updated_at: datetime
 
@@ -330,7 +330,15 @@ class InviteLogResponse(BaseModel):
 
     id: UUID
     invite_task_id: UUID
-    action: Literal["add_contact", "invite_to_chat", "check_user"]
+    action: Literal[
+        "add_contact",
+        "invite_to_chat",
+        "check_user",
+        "check_limits",
+        "process_task",
+        "get_client",
+        "mock_invite",
+    ]
     success: bool
     error_code: Optional[str]
     error_message: Optional[str]

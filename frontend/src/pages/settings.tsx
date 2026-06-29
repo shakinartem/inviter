@@ -27,6 +27,11 @@ export default function SettingsPage() {
   const [siteName, setSiteName] = useState("");
   const [helpText, setHelpText] = useState("");
   const [systemConfig, setSystemConfig] = useState("{}");
+  const [telegramApiId, setTelegramApiId] = useState("");
+  const [telegramApiHash, setTelegramApiHash] = useState("");
+  const [telegramAppTitle, setTelegramAppTitle] = useState("");
+  const [telegramIsDefault, setTelegramIsDefault] = useState(true);
+  const [telegramMockMode, setTelegramMockMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [removingLogo, setRemovingLogo] = useState(false);
@@ -39,21 +44,39 @@ export default function SettingsPage() {
     setSiteName(data.site_name ?? "");
     setHelpText(data.help_text ?? "");
     setSystemConfig(data.system_config ? JSON.stringify(data.system_config, null, 2) : "{}");
+    const profile = data.system_config?.telegram_api as Record<string, unknown> | undefined;
+    setTelegramApiId(profile?.api_id ? String(profile.api_id) : "");
+    setTelegramApiHash(profile?.api_hash ? String(profile.api_hash) : "");
+    setTelegramAppTitle(profile?.app_title ? String(profile.app_title) : "");
+    setTelegramIsDefault(profile?.is_default !== false);
   };
 
   useEffect(() => {
     refreshSettings().catch(() => {});
+    apiClient
+      .get<{ telegram_mock_mode: boolean }>("/settings/runtime")
+      .then((res) => setTelegramMockMode(res.data.telegram_mock_mode))
+      .catch(() => {});
   }, []);
 
   const handleSave = async () => {
     setSaving(true);
     try {
       const parsedConfig = JSON.parse(systemConfig);
+      const nextConfig = {
+        ...parsedConfig,
+        telegram_api: {
+          api_id: telegramApiId ? Number(telegramApiId) : null,
+          api_hash: telegramApiHash || null,
+          app_title: telegramAppTitle || null,
+          is_default: telegramIsDefault,
+        },
+      };
       await apiClient.put("/settings/", {
         language,
         site_name: siteName,
         help_text: helpText,
-        system_config: parsedConfig,
+        system_config: nextConfig,
       });
       setLocale(language);
       toast.success(t("saved"));
@@ -215,6 +238,50 @@ export default function SettingsPage() {
           className="w-full rounded-lg border border-black/10 bg-surface px-4 py-3 font-mono text-xs text-ink placeholder:text-muted/50 focus:border-ink focus:outline-none focus:ring-1 focus:ring-ink"
           placeholder="# Help"
         />
+      </section>
+
+      <section className="rounded-xl border border-black/5 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+            Telegram API
+          </h2>
+          {telegramMockMode && (
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
+              Telegram Mock Mode
+            </span>
+          )}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <input
+            type="number"
+            value={telegramApiId}
+            onChange={(e) => setTelegramApiId(e.target.value)}
+            placeholder="api_id"
+            className="rounded-lg border border-black/10 bg-surface px-4 py-2.5 text-sm text-ink placeholder:text-muted/50 focus:border-ink focus:outline-none focus:ring-1 focus:ring-ink"
+          />
+          <input
+            type="password"
+            value={telegramApiHash}
+            onChange={(e) => setTelegramApiHash(e.target.value)}
+            placeholder="api_hash"
+            className="rounded-lg border border-black/10 bg-surface px-4 py-2.5 text-sm text-ink placeholder:text-muted/50 focus:border-ink focus:outline-none focus:ring-1 focus:ring-ink"
+          />
+          <input
+            type="text"
+            value={telegramAppTitle}
+            onChange={(e) => setTelegramAppTitle(e.target.value)}
+            placeholder="app_title"
+            className="rounded-lg border border-black/10 bg-surface px-4 py-2.5 text-sm text-ink placeholder:text-muted/50 focus:border-ink focus:outline-none focus:ring-1 focus:ring-ink"
+          />
+          <label className="flex items-center gap-2 rounded-lg border border-black/10 bg-surface px-4 py-2.5 text-sm text-ink">
+            <input
+              type="checkbox"
+              checked={telegramIsDefault}
+              onChange={(e) => setTelegramIsDefault(e.target.checked)}
+            />
+            Default profile
+          </label>
+        </div>
       </section>
 
       <section className="rounded-xl border border-black/5 bg-white p-6 shadow-sm">

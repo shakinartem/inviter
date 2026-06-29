@@ -141,6 +141,7 @@ class AccountUpdate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     label: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    phone: Optional[str] = Field(default=None, max_length=32)
     proxy_id: Optional[UUID] = None
     api_id: Optional[int] = Field(default=None, ge=1)
     api_hash: Optional[str] = Field(default=None, min_length=10, max_length=255)

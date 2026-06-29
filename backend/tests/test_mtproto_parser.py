@@ -224,6 +224,18 @@ class TestParseMtprotoText(unittest.TestCase):
         result = parse_mtproto_text(text)
         self.assertEqual(len(result.items), 1)
 
+    def test_parse_official_server_port_secret_format(self):
+        text = """
+        Server: proxy.example.com
+        Port: 443
+        Secret: abcdef123456
+        """
+        result = parse_mtproto_text(text)
+        self.assertEqual(len(result.items), 1)
+        self.assertEqual(result.items[0].host, "proxy.example.com")
+        self.assertEqual(result.items[0].port, 443)
+        self.assertEqual(result.items[0].secret, "abcdef123456")
+
 
 if __name__ == "__main__":
     unittest.main()

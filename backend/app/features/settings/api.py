@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_active_user, get_current_superuser
+from app.core.config import settings as app_settings
 from app.db.session import get_db_session
 from app.features.auth.models import User
 from app.features.settings.schemas import (
@@ -28,6 +29,13 @@ async def get_settings(
     """Get current site settings (singleton)."""
     settings = await service.get_settings()
     return settings
+
+
+@router.get("/runtime")
+async def get_runtime_settings(
+    current_user: User = Depends(get_current_active_user),
+):
+    return {"telegram_mock_mode": app_settings.telegram_mock_mode}
 
 
 @router.put("/", response_model=SettingsRead)

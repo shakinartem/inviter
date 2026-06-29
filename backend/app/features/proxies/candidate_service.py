@@ -43,8 +43,9 @@ from app.features.proxies.mtproto_parser import (
     parse_mtproto_url,
 )
 from app.features.proxies.schemas import ProxyTestResult
+from app.core.config import settings
 
-CANDIDATE_TEST_TIMEOUT = 5  # секунд на проверку одного кандидата
+CANDIDATE_TEST_TIMEOUT = settings.proxy_check_timeout_seconds
 BULK_CHECK_MAX = 50
 
 _LOGGER = logger.bind(module="CandidateService")
@@ -552,7 +553,7 @@ class CandidateService:
         if not candidates:
             return []
 
-        sem = asyncio.Semaphore(10)
+        sem = asyncio.Semaphore(settings.proxy_bulk_check_concurrency)
 
         async def check_with_sem(cand: ProxyCandidate) -> ProxyTestResult:
             async with sem:

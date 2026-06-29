@@ -307,9 +307,7 @@ class TestPrepareTasks:
     @pytest.mark.asyncio
     async def test_no_duplicate_tasks_check(self, service, mock_session):
         """
-        Ensure we don't create duplicate InviteTask for same user.
-        By design prepare_tasks_for_campaign creates one task per user,
-        so duplicates shouldn't happen. This test verifies the flow.
+        Ensure we do not create duplicate InviteTask for the same campaign user.
         """
         # Arrange
         campaign_id = uuid4()
@@ -347,7 +345,5 @@ class TestPrepareTasks:
                 campaign, [account], target_users, settings
             )
 
-        # Assert: both are created (no dedup at this level)
-        # Dedup should be handled upstream (in _get_target_users or API)
-        assert created == 2
-        assert mock_session.add.call_count == 2
+        assert created == 1
+        assert mock_session.add.call_count == 1

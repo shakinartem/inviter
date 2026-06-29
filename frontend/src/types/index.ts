@@ -264,6 +264,27 @@ export interface ParserStats {
   avg_participants: number | null;
 }
 
+export interface ParsedUserResponse {
+  id: string;
+  owner_id: string;
+  chat_id: string;
+  user_id: number;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  status: string | null;
+  is_bot: boolean;
+  is_verified: boolean;
+  is_scam: boolean;
+  is_fake: boolean;
+  last_seen: string | null;
+  was_online_at: string | null;
+  msg_count: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ==================== Campaign types ====================
 export type CampaignStatus = "draft" | "active" | "paused" | "completed" | "failed";
 export type TaskStatus = "pending" | "processing" | "success" | "failed" | "floodwait" | "paused";
@@ -289,6 +310,7 @@ export interface InviteCampaignResponse {
   source_chat_id: number | null;
   source_chat_title: string | null;
   source_type: "chat" | "parsed_list" | "uploaded_list";
+  source_parsed_chat_id: string | null;
   target_chat_id: number;
   target_chat_title: string | null;
   target_chat_username: string | null;
@@ -323,6 +345,7 @@ export interface CampaignCreatePayload {
   source_chat_id?: number | null;
   source_chat_title?: string | null;
   source_type?: "chat" | "parsed_list" | "uploaded_list";
+  source_parsed_chat_id?: string | null;
   notes?: string | null;
   settings?: InviteSettingsPayload;
 }
@@ -374,6 +397,16 @@ export interface CampaignStats {
   finished_at: string | null;
   invites_today: number;
   active_accounts: number;
+}
+
+export interface InviteLogResponse {
+  id: string;
+  invite_task_id: string;
+  action: string;
+  success: boolean;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
 }
 
 // ==================== Common ====================

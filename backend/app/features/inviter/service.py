@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import inspect
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 from uuid import UUID
@@ -20,6 +21,7 @@ from app.features.inviter.schemas import (
     CampaignStats,
 )
 from app.features.accounts.models import Account
+from app.core.config import settings as app_settings
 from app.features.proxies.models import Proxy
 from app.features.parser.models import ParsedChat, ParsedUser
 from app.features.telegram.client_manager import TelegramClientManager
@@ -36,6 +38,8 @@ from telethon.errors import (
     UserIsBlockedError,
     ChatWriteForbiddenError,
 )
+
+settings = app_settings
 
 
 class InviterService:
@@ -217,6 +221,16 @@ class InviterService:
         campaign.started_at = datetime.utcnow()
         await self.session.commit()
 
+        if app_settings.telegram_mock_mode and tasks_created > 0:
+            pending_tasks = await self.get_campaign_tasks(
+                campaign_id=campaign.id,
+                status="pending",
+                skip=0,
+                limit=tasks_created,
+            )
+            for task in pending_tasks:
+                await self.execute_invite_task(task.id)
+
         # В реальной реализации здесь нужно запучить Celery задачи для обработки кампании
         # Например: process_campaign_tasks.delay(campaign_id)
 
@@ -371,6 +385,8 @@ class InviterService:
         """
         tasks_created = 0
         user_index = 0
+        seen_user_ids: set[int] = set()
+        existing_user_ids = await self._get_existing_task_user_ids(campaign.id)
 
         for account in accounts:
             # Вычисляем текущий дневной лимит аккаунта с учётом warmup
@@ -382,6 +398,11 @@ class InviterService:
                 and tasks_created < daily_limit * len(accounts)
             ):
                 target_user = target_users[user_index]
+                target_user_id = int(target_user["user_id"])
+                if target_user_id in seen_user_ids or target_user_id in existing_user_ids:
+                    user_index += 1
+                    continue
+                seen_user_ids.add(target_user_id)
 
                 # Проверяем черные списки
                 if await self._is_user_blacklisted(target_user, settings):
@@ -393,7 +414,7 @@ class InviterService:
                     campaign_id=campaign.id,
                     account_id=account.id,
                     proxy_id=None,  # В реальной реализации нужно назначать прокси
-                    target_user_id=target_user["user_id"],
+                    target_user_id=target_user_id,
                     target_username=target_user.get("username"),
                 )
                 await self._create_task(task_data)
@@ -401,6 +422,18 @@ class InviterService:
                 user_index += 1
 
         return tasks_created
+
+    async def _get_existing_task_user_ids(self, campaign_id: UUID) -> set[int]:
+        try:
+            result = await self.session.execute(
+                select(InviteTask.target_user_id).where(InviteTask.campaign_id == campaign_id)
+            )
+            rows = result.all()
+            if inspect.isawaitable(rows):
+                rows = await rows
+            return {int(row[0]) for row in rows}
+        except Exception:
+            return set()
 
     async def get_account_daily_count(self, account_id: UUID) -> int:
         """
@@ -473,6 +506,38 @@ class InviterService:
                 task_id, "process_task", False, error_code="CAMPAIGN_NOT_FOUND", error_message="Campaign not found"
             )
             return {"success": False, "error": "Campaign not found"}
+
+        if app_settings.telegram_mock_mode:
+            account = await self._get_account(task.account_id)
+            if not account:
+                await self._update_task_status(
+                    task_id,
+                    "failed",
+                    error_code="ACCOUNT_NOT_FOUND",
+                    error_message="Account not found",
+                )
+                await self._create_log(
+                    task_id,
+                    "process_task",
+                    False,
+                    error_code="ACCOUNT_NOT_FOUND",
+                    error_message="Account not found",
+                )
+                return {"success": False, "error": "Account not found"}
+
+            task.status = "success"
+            task.attempts = (task.attempts or 0) + 1
+            task.invited_at = now
+            task.error_code = None
+            task.error_message = None
+            await self._create_log(task_id, "mock_invite", True)
+            try:
+                await self._increment_daily_invite_count(task.account_id)
+            except Exception:
+                logger.debug("Failed to increment mock invite counter", account_id=str(task.account_id))
+            await self.session.commit()
+            await self.session.refresh(task)
+            return {"success": True, "message": "Mock invite succeeded"}
 
         # Получаем настройки кампании с учётом warmup
         settings = await self._get_effective_settings(campaign)

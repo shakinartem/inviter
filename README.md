@@ -125,3 +125,31 @@ python -m pytest tests/ -v
 ## Лицензия
 
 MIT
+
+---
+
+## Test without Telegram API
+
+For local end-to-end MVP checks you can enable a safe mock mode. In this mode
+account checks succeed without a real Telegram session, parser mock lists create
+ParsedChat/ParsedUser rows, and invite tasks complete with `mock_invite` logs.
+
+```bash
+TELEGRAM_MOCK_MODE=true
+docker compose up --build
+```
+
+Manual flow:
+
+1. Open `http://localhost:5173`.
+2. Create an account and click Check.
+3. Create a mock parsed list in Parser.
+4. Create a Campaign from that ParsedChat.
+5. Click Start and inspect Tasks, Stats, and Logs.
+
+## Running tests in Docker
+
+```bash
+docker compose exec backend python -m pip install -r requirements-dev.txt
+docker compose exec backend python -m pytest
+```

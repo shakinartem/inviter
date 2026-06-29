@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     redis_db: int = Field(default=0, alias="REDIS_DB")
     celery_broker_db: int = Field(default=0, alias="CELERY_BROKER_DB")
     celery_result_db: int = Field(default=1, alias="CELERY_RESULT_DB")
+    telegram_mock_mode: bool = Field(default=False, alias="TELEGRAM_MOCK_MODE")
+    proxy_check_timeout_seconds: int = Field(default=3, alias="PROXY_CHECK_TIMEOUT_SECONDS")
+    proxy_bulk_check_concurrency: int = Field(default=10, alias="PROXY_BULK_CHECK_CONCURRENCY")
 
     cors_origins_raw: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173",

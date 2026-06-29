@@ -112,6 +112,56 @@ class ParserService:
         if self._http_client and not self._http_client.is_closed:
             await self._http_client.aclose()
 
+    async def create_mock_parsed_users(
+        self,
+        owner_id: UUID,
+        db_session: AsyncSession,
+        title: str,
+        count: int = 10,
+        username_prefix: str = "mock_user",
+        include_bots: bool = False,
+        include_scam: bool = False,
+        include_fake: bool = False,
+    ) -> ParsedChat:
+        chat = ParsedChat(
+            owner_id=owner_id,
+            chat_id=-(
+                abs(hash(f"{owner_id}:{title}:{datetime.now(timezone.utc).timestamp()}"))
+                % 10_000_000_000
+            ),
+            username=username_prefix,
+            title=title,
+            chat_type="manual",
+            participants_count=count,
+            active_participants=count,
+            source="manual",
+            is_public=False,
+            is_active=True,
+            last_parsed_at=datetime.now(timezone.utc),
+            extra_data={"mock": True, "username_prefix": username_prefix},
+        )
+        db_session.add(chat)
+        await db_session.flush()
+
+        for index in range(1, count + 1):
+            db_session.add(
+                ParsedUser(
+                    owner_id=owner_id,
+                    chat_id=chat.id,
+                    user_id=10_000_000 + index,
+                    username=f"{username_prefix}_{index}",
+                    first_name=f"Mock {index}",
+                    status="member",
+                    is_bot=include_bots and index % 10 == 0,
+                    is_scam=include_scam and index % 15 == 0,
+                    is_fake=include_fake and index % 20 == 0,
+                )
+            )
+
+        await db_session.commit()
+        await db_session.refresh(chat)
+        return chat
+
     # ===================================================================== #
     # Main search method
     # ===================================================================== #

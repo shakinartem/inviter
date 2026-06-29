@@ -281,6 +281,17 @@ class ParsedUserListResponse(BaseModel):
     limit: int = Field(..., ge=1)
 
 
+class MockParsedUsersCreate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    title: str = Field(..., min_length=1, max_length=512)
+    count: int = Field(default=10, ge=1, le=1000)
+    username_prefix: str = Field(default="mock_user", min_length=1, max_length=64)
+    include_bots: bool = False
+    include_scam: bool = False
+    include_fake: bool = False
+
+
 # ==================== Parser request schemas ====================
 
 

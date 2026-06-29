@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 
+from app.core.config import settings
 from app.core.security import get_current_active_user
 from app.db.session import get_db_session
 from app.features.auth.models import User
@@ -199,6 +200,15 @@ async def start_campaign(
         )
 
     # Запускаем Celery задачу для обработки кампании
+    if settings.telegram_mock_mode:
+        result = await service.start_campaign(campaign_id, current_user.id)
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("message", "Campaign start failed"),
+            )
+        return result
+
     task = run_campaign_task.delay(campaign_id, current_user.id)
     logger.bind(
         user_id=current_user.id,

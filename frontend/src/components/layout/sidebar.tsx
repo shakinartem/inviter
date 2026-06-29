@@ -132,12 +132,17 @@ function NavItems() {
 
 export function Sidebar() {
   const [settings, setSettings] = useState<SettingsData | null>(null);
+  const [telegramMockMode, setTelegramMockMode] = useState(false);
   const [locale, setLocaleState] = useState<Locale>(getLocale());
 
   useEffect(() => {
     apiClient
       .get<SettingsData>("/settings/")
       .then((res) => setSettings(res.data))
+      .catch(() => {});
+    apiClient
+      .get<{ telegram_mock_mode: boolean }>("/settings/runtime")
+      .then((res) => setTelegramMockMode(res.data.telegram_mock_mode))
       .catch(() => {});
   }, []);
 
@@ -175,6 +180,11 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 space-y-1 p-3">
+        {telegramMockMode && (
+          <div className="mb-3 rounded-lg bg-amber-100 px-3 py-2 text-xs font-medium text-amber-800">
+            Telegram Mock Mode
+          </div>
+        )}
         <NavItems />
       </nav>
 
