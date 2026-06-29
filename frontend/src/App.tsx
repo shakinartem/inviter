@@ -5,6 +5,8 @@ import { AppLayout } from "@/components/layout/layout";
 import DashboardPage from "@/pages/dashboard";
 import AccountsPage from "@/pages/accounts";
 import ProxiesPage from "@/pages/proxies";
+import MtprotoImportPage from "@/pages/mtproto-import";
+import PlatformsPage from "@/pages/platforms";
 import ParserPage from "@/pages/parser";
 import CampaignsPage from "@/pages/campaigns";
 import SettingsPage from "@/pages/settings";
@@ -46,6 +48,8 @@ export default function App() {
             <Route index element={<DashboardPage />} />
             <Route path="accounts" element={<AccountsPage />} />
             <Route path="proxies" element={<ProxiesPage />} />
+            <Route path="proxies/mtproto-import" element={<MtprotoImportPage />} />
+            <Route path="platforms" element={<PlatformsPage />} />
             <Route path="parser" element={<ParserPage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
             <Route path="settings" element={<SettingsPage />} />

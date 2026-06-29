@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from app.features.accounts.models import Account
     from app.features.proxies.models import Proxy
     from app.features.auth.models import User
+    from app.features.parser.models import ParsedChat
 
 
 class InviteCampaign(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -88,11 +89,18 @@ class InviteCampaign(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Source chat (ParsedChat) — for parsed_list source_type
+    source_parsed_chat_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("parsed_chats.id"), nullable=True,
+        doc="ID ParsedChat, из которого берутся пользователи"
+    )
+
     # Relationships
     owner: Mapped["User"] = relationship(back_populates="invite_campaigns")
     tasks: Mapped[list["InviteTask"]] = relationship(
         back_populates="campaign", cascade="all, delete-orphan"
     )
+    # NOTE: parsed_chat_relation removed — link is via source_parsed_chat_id FK only.
 
     __table_args__ = (
         Index("ix_invite_campaigns_owner_id", "owner_id"),

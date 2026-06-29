@@ -12,7 +12,7 @@ from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from app.features.auth.models import User
-    from app.features.parsed_chats.models import ParsedChat
+    from app.features.parser.models import ParsedChat
 
 
 class Campaign(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -33,4 +33,5 @@ class Campaign(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     owner: Mapped["User"] = relationship(back_populates="campaigns")
-    parsed_chats: Mapped[list["ParsedChat"]] = relationship(back_populates="campaign")
+    # NOTE: parsed_chats relationship removed — it's now handled by InviteCampaign/ParsedChat.
+    # The old Campaign model is kept for backward compatibility only.

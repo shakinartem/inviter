@@ -135,6 +135,10 @@ class InviteCampaignCreate(BaseModel):
         default="chat",
         description="Тип источника пользователей"
     )
+    source_parsed_chat_id: Optional[UUID] = Field(
+        default=None,
+        description="ID ParsedChat (если source_type='parsed_list')"
+    )
     notes: Optional[str] = Field(
         default=None,
         description="Заметки к кампании"
@@ -185,6 +189,10 @@ class InviteCampaignUpdate(BaseModel):
         default=None,
         description="Тип источника пользователей"
     )
+    source_parsed_chat_id: Optional[UUID] = Field(
+        default=None,
+        description="ID ParsedChat (если source_type='parsed_list')"
+    )
     notes: Optional[str] = Field(
         default=None,
         description="Заметки к кампании"
@@ -213,6 +221,7 @@ class InviteCampaignResponse(BaseModel):
     source_chat_id: Optional[int]
     source_chat_title: Optional[str]
     source_type: Literal["chat", "parsed_list", "uploaded_list"]
+    source_parsed_chat_id: Optional[UUID]
     target_chat_id: int
     target_chat_title: Optional[str]
     target_chat_username: Optional[str]

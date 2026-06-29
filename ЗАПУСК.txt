@@ -1,0 +1,49 @@
+=== КАК ЗАПУСТИТЬ ПРОЕКТ (Docker) ===
+
+ШАГ 1 — Первый запуск (сборка и старт):
+  docker compose build --no-cache
+  docker compose up -d
+
+ШАГ 2 — Применить миграции БД:
+  docker compose exec backend alembic upgrade head
+
+ШАГ 3 — Проверить что всё работает:
+  Backend:  http://localhost:8000/          (должен вернуть {"service":"Self-Hosted Telegram Inviter Pro","status":"ok"})
+  Health:   http://localhost:8000/health    (должен вернуть {"status":"ok"})
+  API docs: http://localhost:8000/docs      (Swagger UI)
+  Frontend: http://localhost:5173           (веб-интерфейс)
+
+ШАГ 4 — Просмотр логов:
+  docker compose logs -f backend
+  docker compose logs -f frontend
+
+ШАГ 5 — Остановка:
+  docker compose down
+
+ШАГ 6 — Полная перезагрузка (с пересозданием volumes — осторожно, удалит данные!):
+  docker compose down -v
+  docker compose build --no-cache
+  docker compose up -d
+  docker compose exec backend alembic upgrade head
+
+=== ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ (по умолчанию) ===
+  POSTGRES_DB=inviter
+  POSTGRES_USER=inviter
+  POSTGRES_PASSWORD=inviter
+  APP_SECRET=change-me
+  APP_DEBUG=true
+
+  Можно переопределить через .env файл в корне проекта.
+
+=== РЕГИСТРАЦИЯ ПЕРВОГО ПОЛЬЗОВАТЕЛЯ ===
+  После запуска:
+  1. Открой http://localhost:5173
+  2. Зарегистрируйся
+  3. Первый зарегистрированный пользователь автоматически станет superuser
+     (см. backend/app/core/bootstrap.py — функция ensure_dev_admin)
+
+=== ЕСЛИ ЧТО-ТО НЕ РАБОТАЕТ ===
+  1. Проверь логи: docker compose logs backend
+  2. Убедись что postgres и redis healthy: docker compose ps
+  3. Выполни миграции ещё раз: docker compose exec backend alembic upgrade head
+  4. Пересобери с --no-cache если менял зависимости

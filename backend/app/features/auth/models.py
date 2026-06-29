@@ -12,7 +12,8 @@ if TYPE_CHECKING:
     from app.features.accounts.models import Account
     from app.features.campaigns.models import Campaign
     from app.features.inviter.models import InviteCampaign
-    from app.features.parsed_chats.models import ParsedChat
+    from app.features.parser.models import ParsedChat
+    from app.features.proxies.candidate_models import ProxyCandidate
     from app.features.proxies.models import Proxy
 
 
@@ -29,3 +30,6 @@ class User(SQLAlchemyBaseUserTableUUID, TimestampMixin, Base):
     campaigns: Mapped[list["Campaign"]] = relationship(back_populates="owner")
     parsed_chats: Mapped[list["ParsedChat"]] = relationship(back_populates="owner")
     invite_campaigns: Mapped[list["InviteCampaign"]] = relationship(back_populates="owner")
+    proxy_candidates: Mapped[list["ProxyCandidate"]] = relationship(back_populates="owner")
+
+

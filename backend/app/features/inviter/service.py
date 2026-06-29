@@ -21,6 +21,7 @@ from app.features.inviter.schemas import (
 )
 from app.features.accounts.models import Account
 from app.features.proxies.models import Proxy
+from app.features.parser.models import ParsedChat, ParsedUser
 from app.features.telegram.client_manager import TelegramClientManager
 from telethon.errors import (
     FloodWaitError,
@@ -949,27 +950,46 @@ class InviterService:
     async def _get_target_users(self, campaign: InviteCampaign) -> List[dict]:
         """
         Получить список пользователей для приглашения из источника.
-        В реальной реализации здесь должна быть логика получения пользователей
-        из исходного чата, парсера или загруженного списка.
+        Поддерживает:
+          - parsed_list: загрузка из ParsedUser по source_parsed_chat_id
+          - chat: получение участников из source_chat_id (через Telethon)
+          - uploaded_list: получение из загруженного списка (пока заглушка)
         """
-        # Для демонстрации возвращаем тестовых пользователей
-        # В реальной реализации нужно заменить на реальную логику
+        # Режим parsed_list — берём из ParsedUser
+        if campaign.source_type == "parsed_list" and campaign.source_parsed_chat_id:
+            result = await self.session.execute(
+                select(ParsedUser).where(
+                    ParsedUser.chat_id == campaign.source_parsed_chat_id
+                )
+            )
+            parsed_users = result.scalars().all()
+            target_users = []
+            for pu in parsed_users:
+                # Пропускаем ботов, скам, фейки
+                if pu.is_bot or pu.is_scam or pu.is_fake:
+                    continue
+                target_users.append({
+                    "user_id": pu.user_id,
+                    "username": pu.username,
+                })
+            return target_users
+
+        # Режим chat — получаем через Telethon
         if campaign.source_type == "chat" and campaign.source_chat_id:
-            # Здесь должен быть код для получения участников из source_chat_id
-            # Через Telethon client manager
-            pass
-        elif campaign.source_type == "uploaded_list":
-            # Здесь должен быть код для получения пользователей из загруженного списка
+            # Здесь в реальной реализации получение участников через Telethon
+            logger.warning(
+                f"Telethon source_chat lookup not implemented yet, "
+                f"source_chat_id={campaign.source_chat_id}"
+            )
             pass
 
-        # Возвращаем тестовых пользователей для демонстрации
-        return [
-            {"user_id": 123456789, "username": "user1"},
-            {"user_id": 987654321, "username": "user2"},
-            {"user_id": 111222333, "username": "user3"},
-            {"user_id": 444555666, "username": "user4"},
-            {"user_id": 777888999, "username": "user5"},
-        ]
+        # Режим uploaded_list
+        if campaign.source_type == "uploaded_list":
+            logger.warning("uploaded_list source not implemented yet")
+            pass
+
+        # Если ничего не нашли — пустой список
+        return []
 
     async def _get_task(self, task_id: UUID) -> Optional[InviteTask]:
         """Получить задачу по ID."""

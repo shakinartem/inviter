@@ -156,6 +156,17 @@ export interface ProxyCreatePayload {
   extra_data?: Record<string, any> | null;
 }
 
+export interface ProxyTestResult {
+  proxy_id?: string | null;
+  host: string;
+  port: number;
+  scheme: string;
+  is_working: boolean;
+  ping_ms: number | null;
+  error_message: string | null;
+  tested_at: string;
+}
+
 export interface ProxyStats {
   total: number;
   active: number;

@@ -1,18 +1,3 @@
-"""
-Модели модуля parser — парсер чатов и пользователей по нише.
-
-Содержит:
-- ParsedChat       — спарсенный Telegram-чат/группа/супергруппа
-- ParsedUser       — пользователь чата (участник)
-
-Поддерживаемые источники (source):
-- tgstat           — парсинг через TGStat API/HTML
-- telemetr         — парсинг через Telemetr
-- telegram_search  — глобальный поиск Telegram (SearchGlobal)
-- telegram_dialogs — собственные диалоги аккаунта
-- manual           — ручное добавление
-"""
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -35,8 +20,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
+# Runtime import of User to register it in the SA registry before mapper
+# configuration. This avoids the circular import:
+#   parser.models -> auth.models (for User) -> ... -> parser.models
+from app.features.auth.models import User  # noqa: E402
+
 if TYPE_CHECKING:
-    from app.features.auth.models import User
     from app.features.campaigns.models import Campaign
 
 
@@ -51,13 +40,10 @@ PARSER_SOURCES: tuple[str, ...] = (
 
 
 class ParsedChat(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Спарсенный Telegram-чат/группа/супергруппа.
-
-    Хранит полную информацию о чате, полученную из различных источников
-    (TGStat, Telemetr, глобальный поиск Telegram).
-    """
+    """Спарсенный Telegram-чат/группа/супергруппа."""
 
     __tablename__ = "parsed_chats"
+    __table_args__ = {"extend_existing": True}
 
     # ==================== Ownership ====================
     owner_id: Mapped[UUID] = mapped_column(
@@ -230,10 +216,13 @@ class ParsedChat(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         lazy="selectin",
         doc="Владелец (пользователь, инициировавший парсинг)",
     )
-    campaign: Mapped["Campaign | None"] = relationship(
-        back_populates="parsed_chats",
-        lazy="select",
-        doc="Кампания, использующая этот чат как источник (если привязан)",
+    # NOTE: campaign relationship removed to avoid conflict with old Campaign model.
+    # InviteCampaign now links to ParsedChat via source_parsed_chat_id.
+    parsed_users: Mapped[list["ParsedUser"]] = relationship(
+        back_populates="chat",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+        doc="Пользователи, найденные в этом чате",
     )
 
     # ==================== Computed helpers ====================
@@ -264,10 +253,7 @@ class ParsedChat(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class ParsedUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Спарсенный пользователь (участник чата).
-
-    Хранит информацию о пользователе, полученную при парсинге чата.
-    """
+    """Спарсенный пользователь (участник чата)."""
 
     __tablename__ = "parsed_users"
 
@@ -366,6 +352,7 @@ class ParsedUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     # ==================== Relationships ====================
     chat: Mapped["ParsedChat"] = relationship(
+        back_populates="parsed_users",
         lazy="selectin",
         doc="Чат, в котором найден пользователь",
     )

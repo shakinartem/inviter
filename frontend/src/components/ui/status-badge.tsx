@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 
 type StatusType = "active" | "idle" | "limited" | "cooldown" | "banned" | "inactive" | "error"
   | "draft" | "paused" | "completed" | "failed" | "pending" | "processing" | "success" | "floodwait"
-  | "working" | true | false | null;
+  | "working" | "new" | "checking" | "alive" | "dead" | "approved" | "rejected" | true | false | null;
 
 const statusConfig: Record<string, { label: string; className: string }> = {
   active: { label: "Active", className: "bg-green-100 text-green-700 border-green-200" },
@@ -21,6 +21,12 @@ const statusConfig: Record<string, { label: string; className: string }> = {
   success: { label: "Success", className: "bg-green-100 text-green-700 border-green-200" },
   floodwait: { label: "FloodWait", className: "bg-orange-100 text-orange-700 border-orange-200" },
   working: { label: "Working", className: "bg-green-100 text-green-700 border-green-200" },
+  new: { label: "New", className: "bg-blue-100 text-blue-700 border-blue-200" },
+  checking: { label: "Checking", className: "bg-purple-100 text-purple-700 border-purple-200" },
+  alive: { label: "Alive", className: "bg-teal-100 text-teal-700 border-teal-200" },
+  dead: { label: "Dead", className: "bg-red-100 text-red-700 border-red-200" },
+  approved: { label: "Approved", className: "bg-green-100 text-green-700 border-green-200" },
+  rejected: { label: "Rejected", className: "bg-gray-100 text-gray-500 border-gray-200" },
   "true": { label: "Yes", className: "bg-green-100 text-green-700 border-green-200" },
   "false": { label: "No", className: "bg-red-100 text-red-700 border-red-200" },
 };

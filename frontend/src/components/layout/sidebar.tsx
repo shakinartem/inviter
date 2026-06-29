@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
-import { Globe, HelpCircle, LayoutDashboard, LogOut, Search, Send, Settings, Shield, Users } from "lucide-react";
+import { Globe, HelpCircle, LayoutDashboard, Layers, LogOut, Search, Send, Settings, Shield, Users } from "lucide-react";
 
 import { apiClient } from "@/lib/api-client";
 import { getLocale, setLocale, t, type Locale } from "@/lib/i18n";
@@ -53,6 +53,30 @@ function NavItems() {
       >
         <Shield className="h-4 w-4" />
         {t("proxies")}
+      </NavLink>
+      <NavLink
+        to="/proxies/mtproto-import"
+        className={({ isActive }) =>
+          cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors pl-9",
+            isActive ? "bg-stone-100 text-ink" : "text-muted hover:bg-stone-50 hover:text-ink",
+          )
+        }
+      >
+        <Globe className="h-3 w-3" />
+        MTProto Import
+      </NavLink>
+      <NavLink
+        to="/platforms"
+        className={({ isActive }) =>
+          cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+            isActive ? "bg-ink text-white" : "text-muted hover:bg-stone-100 hover:text-ink",
+          )
+        }
+      >
+        <Layers className="h-4 w-4" />
+        Platforms
       </NavLink>
       <NavLink
         to="/parser"
