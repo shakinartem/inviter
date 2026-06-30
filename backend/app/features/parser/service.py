@@ -35,7 +35,7 @@ from telethon.errors import FloodWaitError
 from telethon.tl.functions.contacts import SearchRequest
 from telethon.tl.types import Channel, Chat, User
 
-from app.db.session import get_db_session
+from app.db.session import AsyncSessionLocal, get_db_session
 from app.features.parser.models import ParsedChat, ParsedUser
 from app.features.parser.schemas import (
     ParsedChatCreate,
@@ -546,7 +546,7 @@ class ParserService:
         close_session = False
 
         if db_session is None:
-            db_session = await get_db_session().__aenter__()
+            db_session = AsyncSessionLocal()
             close_session = True
 
         try:
@@ -578,7 +578,7 @@ class ParserService:
             raise
         finally:
             if close_session:
-                await db_session.__aexit__(None, None, None)
+                await db_session.close()
 
         return saved
 
@@ -701,7 +701,7 @@ class ParserService:
         close_session = False
 
         if db_session is None:
-            db_session = await get_db_session().__aenter__()
+            db_session = AsyncSessionLocal()
             close_session = True
 
         try:
@@ -728,7 +728,7 @@ class ParserService:
 
         finally:
             if close_session:
-                await db_session.__aexit__(None, None, None)
+                await db_session.close()
 
     # ===================================================================== #
     # Export to CSV
@@ -742,7 +742,7 @@ class ParserService:
         """Экспортировать спарсенные чаты в CSV строку."""
         close_session = False
         if db_session is None:
-            db_session = await get_db_session().__aenter__()
+            db_session = AsyncSessionLocal()
             close_session = True
 
         try:
@@ -798,7 +798,7 @@ class ParserService:
 
         finally:
             if close_session:
-                await db_session.__aexit__(None, None, None)
+                await db_session.close()
 
     # ===================================================================== #
     # Stats
@@ -816,7 +816,7 @@ class ParserService:
 
         close_session = False
         if db_session is None:
-            db_session = await get_db_session().__aenter__()
+            db_session = AsyncSessionLocal()
             close_session = True
 
         try:
@@ -851,7 +851,7 @@ class ParserService:
 
         finally:
             if close_session:
-                await db_session.__aexit__(None, None, None)
+                await db_session.close()
 
     async def _count_chats(
         self,
@@ -923,7 +923,7 @@ class ParserService:
         """Удалить спарсенный чат по ID."""
         close_session = False
         if db_session is None:
-            db_session = await get_db_session().__aenter__()
+            db_session = AsyncSessionLocal()
             close_session = True
 
         try:
@@ -951,7 +951,7 @@ class ParserService:
             raise
         finally:
             if close_session:
-                await db_session.__aexit__(None, None, None)
+                await db_session.close()
 
     async def bulk_delete_chats(
         self,
@@ -962,7 +962,7 @@ class ParserService:
         """Массовое удаление спарсенных чатов."""
         close_session = False
         if db_session is None:
-            db_session = await get_db_session().__aenter__()
+            db_session = AsyncSessionLocal()
             close_session = True
 
         try:
@@ -987,7 +987,7 @@ class ParserService:
             raise
         finally:
             if close_session:
-                await db_session.__aexit__(None, None, None)
+                await db_session.close()
 
     # ===================================================================== #
     # Caching
@@ -1051,8 +1051,7 @@ class ParserService:
         """Получить первый активный аккаунт пользователя для поиска."""
         from app.features.accounts.models import Account
 
-        db_session = await get_db_session().__aenter__()
-        try:
+        async with AsyncSessionLocal() as db_session:
             stmt = (
                 select(Account)
                 .where(
@@ -1064,8 +1063,6 @@ class ParserService:
             )
             result = await db_session.execute(stmt)
             return result.scalar_one_or_none()
-        finally:
-            await db_session.__aexit__(None, None, None)
 
     # ===================================================================== #
     # Get / List chats
@@ -1079,7 +1076,7 @@ class ParserService:
         """Получить чат по UUID."""
         close_session = False
         if db_session is None:
-            db_session = await get_db_session().__aenter__()
+            db_session = AsyncSessionLocal()
             close_session = True
 
         try:
@@ -1091,7 +1088,7 @@ class ParserService:
             return result.scalar_one_or_none()
         finally:
             if close_session:
-                await db_session.__aexit__(None, None, None)
+                await db_session.close()
 
     async def list_chats(
         self,
@@ -1108,7 +1105,7 @@ class ParserService:
         """
         close_session = False
         if db_session is None:
-            db_session = await get_db_session().__aenter__()
+            db_session = AsyncSessionLocal()
             close_session = True
 
         try:
@@ -1178,4 +1175,4 @@ class ParserService:
 
         finally:
             if close_session:
-                await db_session.__aexit__(None, None, None)
+                await db_session.close()

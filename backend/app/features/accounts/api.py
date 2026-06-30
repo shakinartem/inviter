@@ -30,6 +30,9 @@ from app.features.accounts.schemas import (
     AccountStats,
     AccountStatusUpdate,
     AccountUpdate,
+    AuthConfirmRequest,
+    AuthConfirmResponse,
+    AuthStartResponse,
     SessionUploadResult,
 )
 from app.features.accounts.service import AccountService
@@ -383,6 +386,111 @@ async def check_account(
         )
 
     return AccountCheckResponse(account_id=account_id, **result)
+
+
+# ==================== Auth operations ====================
+
+
+@router.post("/{account_id}/auth/start", response_model=AuthStartResponse)
+async def auth_start(
+    account_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    service: AccountService = Depends(get_service),
+):
+    """
+    Начать авторизацию аккаунта в Telegram.
+    Отправляет код подтверждения на номер телефона.
+    """
+    account = await service.get_account(account_id)
+    _ensure_owner(account, current_user)
+
+    try:
+        result = await service.auth_start(account_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        )
+    except Exception as e:
+        logger.error("Auth start failed", account_id=str(account_id), error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Auth start failed: {str(e)[:500]}",
+        )
+
+    return AuthStartResponse(
+        account_id=account_id,
+        status="code_sent",
+        phone_code_hash=result["phone_code_hash"],
+        timeout=result.get("timeout", 30),
+    )
+
+
+@router.post("/{account_id}/auth/confirm", response_model=AuthConfirmResponse)
+async def auth_confirm(
+    account_id: UUID,
+    body: AuthConfirmRequest,
+    current_user: User = Depends(get_current_active_user),
+    service: AccountService = Depends(get_service),
+):
+    """
+    Подтвердить код авторизации.
+    При необходимости ввести пароль 2FA.
+    """
+    account = await service.get_account(account_id)
+    _ensure_owner(account, current_user)
+
+    try:
+        result = await service.auth_confirm(
+            account_id=account_id,
+            code=body.code,
+            password=body.password,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        )
+    except Exception as e:
+        error_str = str(e)
+        logger.error("Auth confirm failed", account_id=str(account_id), error=error_str)
+        # Map common errors
+        if "CODE_INVALID" in error_str:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid code. Please check the code and try again.",
+            )
+        if "PASSWORD_REQUIRED" in error_str or "SESSION_PASSWORD_NEEDED" in error_str:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="PASSWORD_REQUIRED",
+            )
+        if "FLOOD_WAIT" in error_str:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many attempts. Please wait before trying again.",
+            )
+        if "PHONE_CODE_EXPIRED" in error_str:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Code expired. Please start authorization again.",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Auth failed: {error_str[:500]}",
+        )
+
+    return AuthConfirmResponse(
+        account_id=account_id,
+        authorized=True,
+        telegram_user_id=result.get("telegram_user_id"),
+        username=result.get("username"),
+        first_name=result.get("first_name"),
+        last_name=result.get("last_name"),
+        is_premium=result.get("is_premium", False),
+        is_bot=result.get("is_bot", False),
+        phone=result.get("phone"),
+        status=result.get("status", "active"),
+        status_message=result.get("status_message"),
+    )
 
 
 @router.post("/{account_id}/invalidate-client", status_code=status.HTTP_200_OK)

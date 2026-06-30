@@ -409,6 +409,39 @@ class AccountCheckResponse(BaseModel):
     )
 
 
+class AuthStartResponse(BaseModel):
+    """Результат начала авторизации."""
+    model_config = ConfigDict(from_attributes=True)
+
+    account_id: UUID
+    status: str = "code_sent"
+    phone_code_hash: str = Field(..., description="Хеш кода для подтверждения")
+    timeout: int = Field(default=30, description="Таймаут для ввода кода (сек)")
+
+
+class AuthConfirmRequest(BaseModel):
+    """Запрос на подтверждение кода авторизации."""
+    code: str = Field(..., min_length=1, max_length=10, description="Код из SMS/Telegram")
+    password: Optional[str] = Field(default=None, description="Пароль 2FA (если требуется)")
+
+
+class AuthConfirmResponse(BaseModel):
+    """Результат подтверждения авторизации."""
+    model_config = ConfigDict(from_attributes=True)
+
+    account_id: UUID
+    authorized: bool
+    telegram_user_id: Optional[int] = None
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    is_premium: bool = False
+    is_bot: bool = False
+    phone: Optional[str] = None
+    status: str = "active"
+    status_message: Optional[str] = None
+
+
 # ==================== Stats ====================
 
 

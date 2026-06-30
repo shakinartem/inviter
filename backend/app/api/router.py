@@ -10,6 +10,7 @@ from app.features.proxies.api import router as proxies_router
 from app.features.proxies.candidate_api import router as candidates_router
 from app.features.inviter.api import router as inviter_router
 from app.features.settings.api import router as settings_router
+from app.features.source_discovery.api import router as source_discovery_router
 
 api_router = APIRouter()
 api_router.include_router(
@@ -35,3 +36,4 @@ api_router.include_router(platforms_router, tags=["platforms"])
 api_router.include_router(inviter_router, tags=["inviter"])
 api_router.include_router(parser_router, tags=["parser"])
 api_router.include_router(settings_router, tags=["settings"])
+api_router.include_router(source_discovery_router, tags=["source-discovery"])

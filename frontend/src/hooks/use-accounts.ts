@@ -117,6 +117,32 @@ export function useUploadSession() {
   });
 }
 
+export function useAuthStart() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (accountId: string) => {
+      const { data } = await apiClient.post(`/accounts/${accountId}/auth/start`);
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }),
+  });
+}
+
+export function useAuthConfirm() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ accountId, code, password }: { accountId: string; code: string; password?: string }) => {
+      const { data } = await apiClient.post(`/accounts/${accountId}/auth/confirm`, { code, password });
+      return data;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["account", vars.accountId] });
+      qc.invalidateQueries({ queryKey: ["account-stats"] });
+    },
+  });
+}
+
 export function useCheckAccount() {
   const qc = useQueryClient();
   return useMutation({

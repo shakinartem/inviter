@@ -15,3 +15,6 @@ redis==5.2.1
 sqlalchemy[asyncio]==2.0.41
 telethon==1.40.0
 uvicorn[standard]==0.34.3
+playwright==1.52.0
+selectolax==0.3.28
+lxml==5.4.0

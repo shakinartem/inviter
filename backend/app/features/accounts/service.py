@@ -657,6 +657,188 @@ class AccountService:
         )
         return result.scalar_one_or_none()
 
+    # ==================== Auth operations ====================
+
+    async def auth_start(self, account_id: UUID) -> dict:
+        """
+        Начать авторизацию аккаунта в Telegram.
+        Отправляет код подтверждения на номер телефона.
+        """
+        account = await self.get_account(account_id)
+        if not account:
+            raise ValueError(f"Account {account_id} not found")
+        if not account.phone:
+            raise ValueError("Account has no phone number. Set phone first.")
+
+        await self._apply_effective_telegram_credentials(account)
+
+        from telethon import TelegramClient
+        from telethon.errors import PhoneNumberInvalidError, ApiIdInvalidError
+
+        session_path = self.client_manager._session_path(account.session_name)
+        proxy = None
+        if account.proxy_id and account.proxy:
+            proxy = account.proxy
+
+        proxy_dict = self.client_manager._build_proxy(proxy) if proxy else None
+
+        client = TelegramClient(
+            session=str(session_path),
+            api_id=account.api_id,
+            api_hash=account.api_hash,
+            proxy=proxy_dict,
+        )
+
+        try:
+            await client.connect()
+            if await client.is_user_authorized():
+                await client.disconnect()
+                raise ValueError("Account is already authorized. Use /check instead.")
+
+            sent = await client.send_code_request(account.phone)
+            phone_code_hash = sent.phone_code_hash
+            timeout = getattr(sent, "timeout", 30)
+
+            # Сохраняем phone_code_hash в extra_data для последующего confirm
+            extra = account.extra_data or {}
+            extra["auth_phone_code_hash"] = phone_code_hash
+            account.extra_data = extra
+            await self.session.commit()
+
+            return {
+                "phone_code_hash": phone_code_hash,
+                "timeout": timeout,
+            }
+        except PhoneNumberInvalidError:
+            await client.disconnect()
+            raise ValueError("Invalid phone number")
+        except ApiIdInvalidError:
+            await client.disconnect()
+            raise ValueError("Invalid API ID or API Hash")
+        except Exception as e:
+            await client.disconnect()
+            raise
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    async def auth_confirm(
+        self,
+        account_id: UUID,
+        code: str,
+        password: Optional[str] = None,
+    ) -> dict:
+        """
+        Подтвердить код авторизации.
+        При необходимости ввести пароль 2FA.
+        """
+        account = await self.get_account(account_id)
+        if not account:
+            raise ValueError(f"Account {account_id} not found")
+
+        phone_code_hash = (account.extra_data or {}).get("auth_phone_code_hash")
+        if not phone_code_hash:
+            raise ValueError(
+                "No pending authorization. Call /auth/start first."
+            )
+
+        await self._apply_effective_telegram_credentials(account)
+
+        from telethon import TelegramClient
+        from telethon.errors import (
+            PhoneCodeInvalidError,
+            PhoneCodeExpiredError,
+            SessionPasswordNeededError,
+            PasswordHashInvalidError,
+            FloodWaitError,
+        )
+
+        session_path = self.client_manager._session_path(account.session_name)
+        proxy = None
+        if account.proxy_id and account.proxy:
+            proxy = account.proxy
+
+        proxy_dict = self.client_manager._build_proxy(proxy) if proxy else None
+
+        client = TelegramClient(
+            session=str(session_path),
+            api_id=account.api_id,
+            api_hash=account.api_hash,
+            proxy=proxy_dict,
+        )
+
+        try:
+            await client.connect()
+
+            try:
+                user = await client.sign_in(
+                    phone=account.phone,
+                    code=code,
+                    phone_code_hash=phone_code_hash,
+                )
+            except SessionPasswordNeededError:
+                if not password:
+                    raise ValueError("PASSWORD_REQUIRED")
+                try:
+                    user = await client.sign_in(password=password)
+                except PasswordHashInvalidError:
+                    raise ValueError("Invalid 2FA password")
+                except Exception as e:
+                    raise ValueError(f"2FA failed: {str(e)[:200]}")
+
+            # Очищаем auth state
+            extra = account.extra_data or {}
+            extra.pop("auth_phone_code_hash", None)
+            account.extra_data = extra
+
+            # Обновляем профиль (до отключения)
+            me = await client.get_me()
+
+            # Отключаем клиент
+            await client.disconnect()
+
+            account.telegram_user_id = me.id
+            account.username = getattr(me, "username", None)
+            account.first_name = getattr(me, "first_name", None)
+            account.last_name = getattr(me, "last_name", None)
+            account.is_premium = bool(
+                getattr(me, "premium", False) or getattr(me, "is_premium", False)
+            )
+            account.is_bot = getattr(me, "bot", False) if hasattr(me, "bot") else False
+            account.phone = getattr(me, "phone", None) or account.phone
+            account.status = "active"
+            account.status_message = None
+            account.last_checked_at = datetime.now(timezone.utc)
+            account.last_seen_at = datetime.now(timezone.utc)
+            await self.session.commit()
+            await self.session.refresh(account)
+
+            return {
+                "telegram_user_id": me.id,
+                "username": getattr(me, "username", None),
+                "first_name": getattr(me, "first_name", None),
+                "last_name": getattr(me, "last_name", None),
+                "is_premium": account.is_premium,
+                "is_bot": account.is_bot,
+                "phone": getattr(me, "phone", None),
+                "status": "active",
+                "status_message": None,
+            }
+
+        except PhoneCodeInvalidError:
+            raise ValueError("CODE_INVALID")
+        except PhoneCodeExpiredError:
+            raise ValueError("PHONE_CODE_EXPIRED")
+        except FloodWaitError as e:
+            raise ValueError(f"FLOOD_WAIT: wait {e.seconds}s")
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"Auth failed: {str(e)[:500]}")
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
     async def _apply_effective_telegram_credentials(self, account: Account) -> None:
         if account.api_id and account.api_hash:
             return
@@ -700,6 +882,9 @@ class AccountService:
 
         await self._apply_effective_telegram_credentials(account)
 
+        proxy = None
+        if account.proxy_id:
+            proxy = account.proxy
 
         account.last_used_at = datetime.now(timezone.utc)
         await self.session.commit()

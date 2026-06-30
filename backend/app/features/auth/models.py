@@ -31,5 +31,6 @@ class User(SQLAlchemyBaseUserTableUUID, TimestampMixin, Base):
     parsed_chats: Mapped[list["ParsedChat"]] = relationship(back_populates="owner")
     invite_campaigns: Mapped[list["InviteCampaign"]] = relationship(back_populates="owner")
     proxy_candidates: Mapped[list["ProxyCandidate"]] = relationship(back_populates="owner")
+    source_candidates: Mapped[list["SourceCandidate"]] = relationship(back_populates="owner")
 
 
