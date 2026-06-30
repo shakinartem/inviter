@@ -53,6 +53,13 @@ class AccountService:
         self, owner_id: UUID, account_in: AccountCreate
     ) -> Account:
         """Создать запись об аккаунте (без .session файла)."""
+        logger.bind(
+            owner_id=str(owner_id),
+            label=account_in.label,
+            phone=account_in.phone,
+            api_id=account_in.api_id,
+            has_api_hash=bool(account_in.api_hash),
+        ).info("Creating account")
         session_name = account_in.session_name or f"acc_{secrets.token_hex(8)}"
 
         # Проверка уникальности session_name
@@ -297,15 +304,10 @@ class AccountService:
 
         if not self.client_manager.session_exists(account.session_name):
             raise FileNotFoundError(
-                f"Session file not found for {account.session_name}. "
-                "Upload it first."
+                "Session file not found. Upload session or authorize account first."
             )
 
         await self._apply_effective_telegram_credentials(account)
-
-        proxy = None
-        if account.proxy_id:
-            proxy = await self._get_proxy(account.proxy_id)
 
         result = await self.client_manager.check_account(account)
 
@@ -318,13 +320,16 @@ class AccountService:
             account.first_name = result["first_name"]
         if result.get("last_name") is not None:
             account.last_name = result["last_name"]
+        if result.get("phone") is not None:
+            account.phone = result["phone"]
         account.is_premium = result.get("is_premium", False)
         account.is_bot = result.get("is_bot", False)
         new_status = result.get("status", "error")
         account.status = new_status
-        if result.get("status_message"):
-            account.status_message = result["status_message"]
-        account.last_seen_at = datetime.now(timezone.utc)
+        account.status_message = result.get("status_message")
+        account.last_checked_at = datetime.now(timezone.utc)
+        if result.get("is_authorized", False):
+            account.last_seen_at = datetime.now(timezone.utc)
 
         # Если аккаунт только что стал активным — сбрасываем banned/cooldown
         if new_status == "active":
@@ -695,10 +700,8 @@ class AccountService:
 
         await self._apply_effective_telegram_credentials(account)
 
-        proxy = None
-        if account.proxy_id:
-            proxy = await self._get_proxy(account.proxy_id)
 
         account.last_used_at = datetime.now(timezone.utc)
         await self.session.commit()
         return await self.client_manager.get_client(account, proxy)
+

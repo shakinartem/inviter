@@ -275,6 +275,7 @@ class AccountResponse(BaseModel):
     # Metadata
     metadata: Optional[dict[str, Any]] = Field(
         default=None,
+        validation_alias="account_metadata",
         description="Произвольные данные (алиас для extra_data)",
     )
     notes: Optional[str]
@@ -447,3 +448,4 @@ class ClientPoolHealth(BaseModel):
     disconnected: int = Field(..., ge=0)
     sessions_dir: str
     redis_enabled: bool
+

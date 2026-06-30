@@ -450,6 +450,7 @@ class TelegramClientManager:
             client = await self.get_client(account, proxy)
         except (AuthenticationError, FloodLimitError, SessionInvalidError, ClientError) as exc:
             return {
+                "is_authorized": False,
                 "status": "error",
                 "status_message": str(exc),
             }
@@ -457,30 +458,59 @@ class TelegramClientManager:
         try:
             me = await client.get_me()
         except te.AuthKeyUnregisteredError:
-            return {"status": "banned", "status_message": "AuthKey unregistered"}
+            return {
+                "is_authorized": False,
+                "status": "banned",
+                "status_message": "AuthKey unregistered",
+            }
         except te.UserDeactivatedError:
-            return {"status": "banned", "status_message": "Account deactivated"}
+            return {
+                "is_authorized": False,
+                "status": "banned",
+                "status_message": "Account deactivated",
+            }
         except te.UserDeactivatedBanError:
-            return {"status": "banned", "status_message": "Account banned"}
+            return {
+                "is_authorized": False,
+                "status": "banned",
+                "status_message": "Account banned",
+            }
         except te.FloodWaitError as exc:
             await self.set_floodwait(account.id, exc.seconds)
-            return {"status": "cooldown", "status_message": f"FloodWait {exc.seconds}s"}
+            return {
+                "is_authorized": False,
+                "status": "cooldown",
+                "status_message": f"FloodWait {exc.seconds}s",
+            }
         except te.PeerFloodError:
             await self.set_floodwait(account.id, 3600)
-            return {"status": "limited", "status_message": "PeerFlood"}
+            return {
+                "is_authorized": False,
+                "status": "limited",
+                "status_message": "PeerFlood",
+            }
         except Exception as exc:
-            return {"status": "error", "status_message": str(exc)[:500]}
+            return {
+                "is_authorized": False,
+                "status": "error",
+                "status_message": str(exc)[:500],
+            }
         finally:
             await self.disconnect_client(account.id)
 
         return {
+            "is_authorized": True,
             "status": "active",
             "status_message": None,
             "telegram_user_id": me.id,
             "username": me.username,
             "first_name": me.first_name,
             "last_name": me.last_name,
-            "is_premium": getattr(me, "premium", False),
+            "phone": getattr(me, "phone", None),
+            "is_premium": bool(
+                getattr(me, "premium", False)
+                or getattr(me, "is_premium", False)
+            ),
             "is_bot": me.bot if hasattr(me, "bot") else False,
         }
 

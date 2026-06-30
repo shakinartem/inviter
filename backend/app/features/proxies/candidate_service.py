@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import socket
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -439,55 +438,66 @@ class CandidateService:
             score -= 30
         return max(0, score)
 
-    async def check_candidate(
-        self, candidate: ProxyCandidate
-    ) -> ProxyTestResult:
-        """Проверить кандидата любого типа (TCP connect).
-
-        Для всех типов делает TCP connect host:port с таймаутом.
-        """
+    async def _probe_candidate_endpoint(
+        self, host: str, port: int
+    ) -> tuple[bool, float, str | None]:
         start_time = time.monotonic()
-
-        # Пытаемся обновить статус на "checking"
-        candidate.status = "checking"
-        await self.session.commit()
-
-        repeated_failures = candidate.last_error is not None
-
-        # TCP connect
         try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(
-                    host=candidate.host,
-                    port=candidate.port,
-                ),
+            _reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host=host, port=port),
                 timeout=CANDIDATE_TEST_TIMEOUT,
             )
             writer.close()
             await writer.wait_closed()
+            elapsed_ms = round((time.monotonic() - start_time) * 1000, 1)
+            return True, elapsed_ms, None
         except asyncio.TimeoutError:
             elapsed_ms = round((time.monotonic() - start_time) * 1000, 1)
-            return self._update_candidate_after_check(
-                candidate, False, elapsed_ms,
+            return (
+                False,
+                elapsed_ms,
                 f"Connection timeout after {CANDIDATE_TEST_TIMEOUT}s",
             )
         except (ConnectionRefusedError, ConnectionResetError, OSError) as exc:
             elapsed_ms = round((time.monotonic() - start_time) * 1000, 1)
-            return self._update_candidate_after_check(
-                candidate, False, elapsed_ms,
-                f"Connection refused: {exc}",
-            )
+            return False, elapsed_ms, f"Connection refused: {exc}"
         except Exception as exc:
             elapsed_ms = round((time.monotonic() - start_time) * 1000, 1)
-            return self._update_candidate_after_check(
-                candidate, False, elapsed_ms,
-                str(exc),
-            )
+            return False, elapsed_ms, str(exc)
 
-        elapsed_ms = round((time.monotonic() - start_time) * 1000, 1)
-        return self._update_candidate_after_check(
-            candidate, True, elapsed_ms, None,
+    async def check_candidate(
+        self, candidate: ProxyCandidate
+    ) -> ProxyTestResult:
+        """?????????????????? ?????????????????? ???????????? ???????? (TCP connect)."""
+        _LOGGER.info(
+            "Start proxy check",
+            candidate_id=str(candidate.id),
+            proxy_type=candidate.proxy_type,
+            host=candidate.host,
+            port=candidate.port,
         )
+        candidate.status = "checking"
+        await self.session.commit()
+
+        is_alive, latency_ms, error_message = await self._probe_candidate_endpoint(
+            candidate.host,
+            candidate.port,
+        )
+        result = await self._update_candidate_after_check(
+            candidate=candidate,
+            is_alive=is_alive,
+            latency_ms=latency_ms,
+            error_message=error_message,
+        )
+        await self.session.commit()
+        _LOGGER.info(
+            "Proxy check result",
+            candidate_id=str(candidate.id),
+            status=candidate.status,
+            latency_ms=latency_ms,
+            error=error_message,
+        )
+        return result
 
     async def _update_candidate_after_check(
         self,
@@ -497,6 +507,7 @@ class CandidateService:
         error_message: str | None,
     ) -> ProxyTestResult:
         """Обновить кандидата после проверки."""
+        repeated_failures = candidate.last_error is not None
         candidate.status = "alive" if is_alive else "dead"
         candidate.latency_ms = latency_ms
         candidate.last_checked_at = datetime.now(timezone.utc)
@@ -506,7 +517,7 @@ class CandidateService:
             latency_ms=latency_ms,
             proxy_type=candidate.proxy_type,
             source_type=candidate.source_type,
-            repeated_failures=candidate.last_error is not None and not is_alive,
+            repeated_failures=repeated_failures and not is_alive,
         )
 
         return ProxyTestResult(
@@ -533,14 +544,12 @@ class CandidateService:
         candidate = await self.get_candidate(candidate_id, owner_id)
         if not candidate:
             raise ValueError(f"Candidate {candidate_id} not found")
-        result = await self.check_candidate(candidate)
-        await self.session.commit()
-        return result
+        return await self.check_candidate(candidate)
 
     async def bulk_check_candidates(
         self, ids: list[UUID], owner_id: UUID
     ) -> list[ProxyTestResult]:
-        """Массовая проверка кандидатов (макс. BULK_CHECK_MAX)."""
+        """???????????????? ???????????????? ???????????????????? (????????. BULK_CHECK_MAX)."""
         if len(ids) > BULK_CHECK_MAX:
             raise ValueError(f"Maximum {BULK_CHECK_MAX} candidates per bulk check")
 
@@ -553,20 +562,48 @@ class CandidateService:
         if not candidates:
             return []
 
-        sem = asyncio.Semaphore(settings.proxy_bulk_check_concurrency)
+        _LOGGER.info(
+            "Bulk proxy check started",
+            requested=len(ids),
+            checked=len(candidates),
+            concurrency=settings.proxy_bulk_check_concurrency,
+        )
+        for candidate in candidates:
+            candidate.status = "checking"
+        await self.session.commit()
 
-        async def check_with_sem(cand: ProxyCandidate) -> ProxyTestResult:
+        sem = asyncio.Semaphore(max(1, settings.proxy_bulk_check_concurrency))
+
+        async def probe_with_sem(cand: ProxyCandidate) -> tuple[UUID, bool, float, str | None]:
             async with sem:
-                return await self.check_candidate(cand)
+                is_alive, latency_ms, error_message = await self._probe_candidate_endpoint(
+                    cand.host,
+                    cand.port,
+                )
+                return cand.id, is_alive, latency_ms, error_message
 
-        tasks = [check_with_sem(c) for c in candidates]
-        results = await asyncio.gather(*tasks)
-
-        # Сохраняем результаты
+        probe_results = await asyncio.gather(
+            *(probe_with_sem(candidate) for candidate in candidates)
+        )
+        results_by_id = {
+            candidate_id: (is_alive, latency_ms, error_message)
+            for candidate_id, is_alive, latency_ms, error_message in probe_results
+        }
+        results: list[ProxyTestResult] = []
+        for candidate in candidates:
+            is_alive, latency_ms, error_message = results_by_id[candidate.id]
+            results.append(
+                await self._update_candidate_after_check(
+                    candidate=candidate,
+                    is_alive=is_alive,
+                    latency_ms=latency_ms,
+                    error_message=error_message,
+                )
+            )
         await self.session.commit()
 
         _LOGGER.info(
-            "Bulk check completed",
+            "Bulk proxy check completed",
             requested=len(ids),
             checked=len(candidates),
             working=sum(1 for r in results if r.is_working),

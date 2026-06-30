@@ -47,7 +47,10 @@ export function useCreateAccount() {
       const { data } = await apiClient.post<AccountResponse>("/accounts", payload);
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["account-stats"] });
+    },
   });
 }
 
@@ -121,6 +124,10 @@ export function useCheckAccount() {
       const { data } = await apiClient.post(`/accounts/${id}/check`);
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["account", id] });
+      qc.invalidateQueries({ queryKey: ["account-stats"] });
+    },
   });
 }

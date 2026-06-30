@@ -9,11 +9,17 @@ import { useImportMtproto, useImportText, useProxyCandidates, useCheckCandidate,
 import { formatDistanceToNow } from "date-fns";
 import { ru } from "date-fns/locale";
 
+function errMessage(error: unknown) {
+  const anyErr = error as any;
+  return anyErr?.response?.data?.detail ?? anyErr?.message ?? "Request failed";
+}
+
 export default function MtprotoImportPage() {
   const [mtprotoText, setMtprotoText] = useState("");
   const [mtprotoSourceName, setMtprotoSourceName] = useState("");
   const [proxyText, setProxyText] = useState("");
   const [proxySourceName, setProxySourceName] = useState("");
+  const [checkingId, setCheckingId] = useState<string | null>(null);
 
   const importMtproto = useImportMtproto();
   const importText = useImportText();
@@ -25,6 +31,7 @@ export default function MtprotoImportPage() {
   const del = useDeleteCandidate();
 
   const candidates = candidatesData?.items || [];
+  const newCandidateIds = candidates.filter((candidate) => candidate.status === "new").map((candidate) => candidate.id);
 
   const handleImportMtproto = async () => {
     if (!mtprotoText.trim()) {
@@ -57,6 +64,32 @@ export default function MtprotoImportPage() {
       setProxyText("");
     } catch {
       toast.error("Ошибка импорта прокси");
+    }
+  };
+
+  const handleCheckCandidate = async (candidateId: string) => {
+    setCheckingId(candidateId);
+    try {
+      const result = await checkCandidate.mutateAsync(candidateId);
+      toast.success(result.is_working ? "Proxy is alive" : result.error_message ?? "Proxy marked dead");
+    } catch (error) {
+      toast.error(errMessage(error));
+    } finally {
+      setCheckingId(null);
+    }
+  };
+
+  const handleBulkCheck = async () => {
+    if (newCandidateIds.length === 0) {
+      return;
+    }
+
+    try {
+      const results = await bulkCheck.mutateAsync({ ids: newCandidateIds });
+      const aliveCount = results.filter((result) => result.is_working).length;
+      toast.success(`Checked ${results.length} candidates: ${aliveCount} alive`);
+    } catch (error) {
+      toast.error(errMessage(error));
     }
   };
 
@@ -169,23 +202,15 @@ export default function MtprotoImportPage() {
             </p>
           ) : (
             <>
-              {candidates.filter(c => c.status === "new").length > 0 && (
+              {newCandidateIds.length > 0 && (
                 <Button
                   variant="outline"
                   size="sm"
                   className="mb-4"
-                  onClick={() => {
-                    const newIds = candidates
-                      .filter(c => c.status === "new")
-                      .map(c => c.id);
-                    if (newIds.length > 0) {
-                      bulkCheck.mutate({ ids: newIds });
-                      toast.info(`Проверка ${newIds.length} кандидатов...`);
-                    }
-                  }}
-                  disabled={bulkCheck.isPending}
+                  onClick={handleBulkCheck}
+                  disabled={bulkCheck.isPending || checkCandidate.isPending}
                 >
-                  {bulkCheck.isPending ? "Проверка..." : "Проверить все новые"}
+                  {bulkCheck.isPending ? `Checking ${newCandidateIds.length}...` : `Check all new (${newCandidateIds.length})`}
                 </Button>
               )}
               <div className="overflow-x-auto">
@@ -198,6 +223,7 @@ export default function MtprotoImportPage() {
                       <th className="text-left py-2 px-2">Статус</th>
                       <th className="text-left py-2 px-2">Score</th>
                       <th className="text-left py-2 px-2">Latency</th>
+                      <th className="text-left py-2 px-2">Error</th>
                       <th className="text-left py-2 px-2">Источник</th>
                       <th className="text-left py-2 px-2">Проверен</th>
                       <th className="text-right py-2 px-2">Действия</th>
@@ -229,6 +255,7 @@ export default function MtprotoImportPage() {
                         <td className="py-2 px-2 font-mono text-xs">
                           {c.latency_ms ? `${c.latency_ms.toFixed(0)}ms` : "-"}
                         </td>
+                        <td className="py-2 px-2 text-xs text-red-600">{c.last_error ?? "-"}</td>
                         <td className="py-2 px-2 text-xs">{c.source_type}</td>
                         <td className="py-2 px-2 text-xs">
                           {c.last_checked_at
@@ -241,10 +268,10 @@ export default function MtprotoImportPage() {
                               variant="outline"
                               size="sm"
                               className="h-7 text-xs"
-                              onClick={() => checkCandidate.mutate(c.id)}
-                              disabled={checkCandidate.isPending}
+                              onClick={() => handleCheckCandidate(c.id)}
+                              disabled={checkCandidate.isPending || bulkCheck.isPending}
                             >
-                              Check
+                              {checkingId === c.id ? "Checking..." : "Check"}
                             </Button>
                             {c.status !== "approved" && (
                               <Button
