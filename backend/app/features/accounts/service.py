@@ -673,7 +673,7 @@ class AccountService:
         await self._apply_effective_telegram_credentials(account)
 
         from telethon import TelegramClient
-        from telethon.errors import PhoneNumberInvalidError, ApiIdInvalidError
+        from telethon.errors import PhoneNumberInvalidError, ApiIdInvalidError, FloodWaitError
 
         session_path = self.client_manager._session_path(account.session_name)
         proxy = None
@@ -690,12 +690,12 @@ class AccountService:
         )
 
         try:
-            await client.connect()
+            await asyncio.wait_for(client.connect(), timeout=30)
             if await client.is_user_authorized():
                 await client.disconnect()
                 raise ValueError("Account is already authorized. Use /check instead.")
 
-            sent = await client.send_code_request(account.phone)
+            sent = await asyncio.wait_for(client.send_code_request(account.phone), timeout=30)
             phone_code_hash = sent.phone_code_hash
             timeout = getattr(sent, "timeout", 30)
 
@@ -715,9 +715,15 @@ class AccountService:
         except ApiIdInvalidError:
             await client.disconnect()
             raise ValueError("Invalid API ID or API Hash")
+        except FloodWaitError as e:
+            await client.disconnect()
+            raise ValueError(f"Telegram flood wait: {e.seconds}s. Try again later.")
+        except asyncio.TimeoutError:
+            await client.disconnect()
+            raise ValueError("Telegram request timeout. Check network or proxy and try again.")
         except Exception as e:
             await client.disconnect()
-            raise
+            raise ValueError(f"Auth start failed: {str(e)[:500]}")
         finally:
             if client.is_connected():
                 await client.disconnect()

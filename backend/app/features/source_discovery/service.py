@@ -172,7 +172,7 @@ class TgstatDiscoveryService:
     async def _parse_search_card(
         self, card: Any, query: str
     ) -> Optional[SourceCandidate]:
-        """Parse a single search result card."""
+        """Parse a single search result card with stricter filtering."""
         now = datetime.now(timezone.utc)
 
         # Title and link
@@ -196,14 +196,14 @@ class TgstatDiscoveryService:
                 url = f"https://t.me/{username}"
         elif href.startswith("http"):
             tgstat_url = href
-            # Try to extract from URL
+            # Try to extract t.me username from URL
             match = re.search(r"t\.me/([a-zA-Z0-9_]+)", href)
             if match:
                 username = match.group(1)
                 url = href
 
-        if not username and not title:
-            return None
+        # Must have at least one valid identifier: username or tgstat_url or valid source URL
+        has_valid_link = bool(username or tgstat_url or (url and url.startswith("https://t.me/")))
 
         # Category
         cat_el = await card.query_selector(
@@ -235,6 +235,39 @@ class TgstatDiscoveryService:
         elif "channel" in card_text or "канал" in card_text:
             source_type = "channel"
 
+        # Reject junk UI/payment/ad/email elements
+        junk_titles = {"попробовать", "отправить", "e-mail", "руб", "мес", "тариф", "реклама"}
+        title_lower = (title or "").lower()
+        if any(junk in title_lower for junk in junk_titles):
+            return None
+
+        # Reject if no real link and no meaningful title
+        if not has_valid_link and not title:
+            return None
+
+        # Reject if title looks like UI button/price
+        if title and re.search(r"\d+\s*руб", title_lower):
+            return None
+
+        # Reject hyper-short or meaningless titles with no link
+        if not has_valid_link and len(title_lower.split()) < 2:
+            return None
+
+        # Basic quality validation: title must contain at least 3 letters (Cyrillic/Latin)
+        if title and not re.search(r"[a-zA-Zа-яА-ЯёЁ]{3,}", title):
+            return None
+
+        raw_data = {
+            "query": query,
+            "title": title,
+            "href": href,
+            "category": category,
+            "description": description,
+            "subscribers_text": (await subs_el.inner_text()).strip() if subs_el else None,
+            "card_text_snippet": (await card.inner_text()).strip()[:500],
+            "source_type": source_type,
+        }
+
         candidate = SourceCandidate(
             source_type=source_type,
             title=title[:255] if title else None,
@@ -247,6 +280,7 @@ class TgstatDiscoveryService:
             discovered_by_query=query,
             discovered_at=now,
             status="discovered",
+            raw_data=raw_data,
         )
 
         return candidate
@@ -770,11 +804,22 @@ class TgstatDiscoveryService:
             result = await db_session.execute(stmt)
             candidates = list(result.scalars().all())
 
+            # Pre-fetch scores to avoid MissingGreenlet on lazy relationship
+            candidate_ids = [c.id for c in candidates]
+            scores_by_candidate: dict[UUID, int] = {}
+            if candidate_ids:
+                scores_stmt = (
+                    select(SourceCandidate.id, SourceScore.total_score)
+                    .join(SourceScore, SourceScore.source_candidate_id == SourceCandidate.id)
+                    .where(SourceCandidate.id.in_(candidate_ids))
+                )
+                scores_result = await db_session.execute(scores_stmt)
+                for cid, total_score in scores_result.all():
+                    scores_by_candidate[cid] = total_score
+
             items = []
             for c in candidates:
-                best_score = None
-                if c.scores:
-                    best_score = max(s.total_score for s in c.scores)
+                best_score = scores_by_candidate.get(c.id)
                 items.append(
                     SourceCandidateListItem(
                         id=c.id,

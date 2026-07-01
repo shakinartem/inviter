@@ -20,7 +20,23 @@ from app.db.redis import get_redis
 
 
 # Инициализация зависимостей для задач
-async def get_inviter_service() -> InviterService:
+def _run_async(coro):
+    """Запустить async coroutineout блокировки event loop Celery."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Если loop уже работает (например в ThreadPool), создаем новый
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(asyncio.run, coro)
+                return future.result(timeout=300)
+        else:
+            return loop.run_until_complete(coro)
+    except RuntimeError:
+        return asyncio.run(coro)
+
+
+async def _get_inviter_service_async() -> InviterService:
     """Создать экземпляр InviterService с необходимыми зависимостями."""
     async with AsyncSessionLocal() as session:
         redis = await get_redis()
@@ -29,7 +45,7 @@ async def get_inviter_service() -> InviterService:
 
 
 @celery_app.task(name="inviter.run_campaign", bind=True, max_retries=3)
-async def run_campaign(self, campaign_id: UUID, user_id: UUID) -> dict:
+def run_campaign(self, campaign_id: UUID, user_id: UUID) -> dict:
     """
     Запуск всей кампании в фоне.
     Отвечает за подготовку задач и запуск их выполнения.
@@ -38,10 +54,10 @@ async def run_campaign(self, campaign_id: UUID, user_id: UUID) -> dict:
     
     try:
         # Создаем сервис
-        inviter_service = await get_inviter_service()
+        inviter_service = _run_async(_get_inviter_service_async())
         
         # Запускаем кампанию через сервис
-        result = await inviter_service.start_campaign(campaign_id, user_id)
+        result = _run_async(inviter_service.start_campaign(campaign_id, user_id))
         
         if not result["success"]:
             logger.bind(campaign_id=campaign_id).error(
@@ -63,7 +79,7 @@ async def run_campaign(self, campaign_id: UUID, user_id: UUID) -> dict:
 
 
 @celery_app.task(name="inviter.execute_single_invite", bind=True, max_retries=5)
-async def execute_single_invite(self, task_id: UUID) -> dict:
+def execute_single_invite(self, task_id: UUID) -> dict:
     """
     Выполнение одной InviteTask.
     Основная задача, которая вызывает inviter_service.execute_invite_task(task_id).
@@ -72,10 +88,10 @@ async def execute_single_invite(self, task_id: UUID) -> dict:
     
     try:
         # Создаем сервис
-        inviter_service = await get_inviter_service()
+        inviter_service = _run_async(_get_inviter_service_async())
         
         # Выполняем задачу
-        result = await inviter_service.execute_invite_task(task_id)
+        result = _run_async(inviter_service.execute_invite_task(task_id))
         
         # Обрабатываем результат
         if result.get("success"):
@@ -83,36 +99,7 @@ async def execute_single_invite(self, task_id: UUID) -> dict:
             
             # После успешного выполнения проверяем, нужно ли запускать следующую задачу
             # Это делается через проверку активных задач в кампании
-            async with AsyncSessionLocal() as session:
-                # Получаем задачу чтобы получить campaign_id
-                from app.features.inviter.models import InviteTask
-                task_result = await session.execute(
-                    select(InviteTask).where(InviteTask.id == task_id)
-                )
-                task = task_result.scalar_one_or_none()
-                
-                if task:
-                    # Проверяем, есть ли еще pending задачи в кампании
-                    pending_count_result = await session.execute(
-                        select(func.count(InviteTask.id))
-                        .where(
-                            and_(
-                                InviteTask.campaign_id == task.campaign_id,
-                                InviteTask.status == "pending"
-                            )
-                        )
-                    )
-                    pending_count = pending_count_result.scalar()
-                    
-                    if pending_count > 0:
-                        logger.bind(
-                            task_id=task_id, 
-                            campaign_id=task.campaign_id
-                        ).info(
-                            f"There are {pending_count} pending tasks remaining in campaign"
-                        )
-                        # В реальной реализации здесь можно запустить следующую задачу
-                        # Но мы полагаемся на Celery beat или внешний планировщик
+            # (пропускаем дополнительный запрос в рамках задачи execute_single_invite)
                         
         else:
             # Обрабатываем ошибки
@@ -152,7 +139,7 @@ async def execute_single_invite(self, task_id: UUID) -> dict:
 
 
 @celery_app.task(name="inviter.retry_floodwait_tasks")
-async def retry_floodwait_tasks() -> dict:
+def retry_floodwait_tasks() -> dict:
     """
     Периодическая задача для повторного запуска задач после FloodWait.
     Находит все задачи со статусом floodwait, у которых время ожидания истекло,
@@ -161,48 +148,51 @@ async def retry_floodwait_tasks() -> dict:
     logger.info("Starting floodwait retry task")
     
     try:
-        async with AsyncSessionLocal() as session:
-            now = datetime.utcnow()
-            
-            # Находим задачи со статусом floodwait, у которых время вышло
-            result = await session.execute(
-                select(InviteTask)
-                .where(
-                    and_(
-                        InviteTask.status == "floodwait",
-                        InviteTask.next_attempt_at <= now
+        async def _run() -> dict:
+            async with AsyncSessionLocal() as session:
+                now = datetime.utcnow()
+                
+                # Находим задачи со статусом floodwait, у которых время вышло
+                result = await session.execute(
+                    select(InviteTask)
+                    .where(
+                        and_(
+                            InviteTask.status == "floodwait",
+                            InviteTask.next_attempt_at <= now
+                        )
                     )
                 )
-            )
-            floodwait_tasks = result.scalars().all()
-            
-            if not floodwait_tasks:
-                logger.info("No floodwait tasks ready for retry")
-                return {"success": True, "retried_count": 0}
+                floodwait_tasks = result.scalars().all()
                 
-            # Переводим задачи в статус pending
-            retried_count = 0
-            for task in floodwait_tasks:
-                task.status = "pending"
-                task.next_attempt_at = None
-                retried_count += 1
+                if not floodwait_tasks:
+                    logger.info("No floodwait tasks ready for retry")
+                    return {"success": True, "retried_count": 0}
+                    
+                # Переводим задачи в статус pending
+                retried_count = 0
+                for task in floodwait_tasks:
+                    task.status = "pending"
+                    task.next_attempt_at = None
+                    retried_count += 1
+                    
+                await session.commit()
                 
-            await session.commit()
-            
-            logger.info(
-                f"Reset {retried_count} floodwait tasks to pending status"
-            )
-            
-            # Запускаем выполнение этих задач
-            for task in floodwait_tasks:
-                # Запускаем задачу выполнения приглашения
-                execute_single_invite.delay(task.id)
+                logger.info(
+                    f"Reset {retried_count} floodwait tasks to pending status"
+                )
                 
-            return {
-                "success": True, 
-                "retried_count": retried_count,
-                "message": f"Reset {retried_count} floodwait tasks for retry"
-            }
+                # Запускаем выполнение этих задач
+                for task in floodwait_tasks:
+                    # Запускаем задачу выполнения приглашения
+                    execute_single_invite.delay(task.id)
+                    
+                return {
+                    "success": True, 
+                    "retried_count": retried_count,
+                    "message": f"Reset {retried_count} floodwait tasks for retry"
+                }
+        
+        return _run_async(_run())
             
     except Exception as e:
         logger.error(f"Error in retry_floodwait_tasks: {e}", exc_info=True)
@@ -210,7 +200,7 @@ async def retry_floodwait_tasks() -> dict:
 
 
 @celery_app.task(name="inviter.monitor_campaigns")
-async def monitor_campaigns() -> dict:
+def monitor_campaigns() -> dict:
     """
     Мониторинг активных кампаний.
     Проверяет статус кампаний и обновляет их при необходимости.
@@ -218,56 +208,59 @@ async def monitor_campaigns() -> dict:
     logger.info("Starting campaign monitoring task")
     
     try:
-        async with AsyncSessionLocal() as session:
-            # Находим активные кампании, которые могут быть завершены
-            result = await session.execute(
-                select(InviteCampaign)
-                .where(InviteCampaign.status == "active")
-            )
-            active_campaigns = result.scalars().all()
-            
-            completed_count = 0
-            
-            for campaign in active_campaigns:
-                # Проверяем, все ли задачи кампании завершены
-                from app.features.inviter.models import InviteTask
-                
-                total_result = await session.execute(
-                    select(func.count(InviteTask.id))
-                    .where(InviteTask.campaign_id == campaign.id)
+        async def _run() -> dict:
+            async with AsyncSessionLocal() as session:
+                # Находим активные кампании, которые могут быть завершены
+                result = await session.execute(
+                    select(InviteCampaign)
+                    .where(InviteCampaign.status == "active")
                 )
-                total_tasks = total_result.scalar()
+                active_campaigns = result.scalars().all()
                 
-                completed_result = await session.execute(
-                    select(func.count(InviteTask.id))
-                    .where(
-                        and_(
-                            InviteTask.campaign_id == campaign.id,
-                            InviteTask.status == "success"
+                completed_count = 0
+                
+                for campaign in active_campaigns:
+                    # Проверяем, все ли задачи кампании завершены
+                    from app.features.inviter.models import InviteTask
+                    
+                    total_result = await session.execute(
+                        select(func.count(InviteTask.id))
+                        .where(InviteTask.campaign_id == campaign.id)
+                    )
+                    total_tasks = total_result.scalar()
+                    
+                    completed_result = await session.execute(
+                        select(func.count(InviteTask.id))
+                        .where(
+                            and_(
+                                InviteTask.campaign_id == campaign.id,
+                                InviteTask.status == "success"
+                            )
                         )
                     )
-                )
-                completed_tasks = completed_result.scalar()
-                
-                # Если все задачи успешные или нет задач вообще, завершаем кампанию
-                if total_tasks > 0 and completed_tasks == total_tasks:
-                    campaign.status = "completed"
-                    campaign.finished_at = datetime.utcnow()
-                    completed_count += 1
-                    logger.info(
-                        f"Campaign {campaign.id} completed automatically "
-                        f"({completed_tasks}/{total_tasks} tasks successful)"
-                    )
+                    completed_tasks = completed_result.scalar()
                     
-            if completed_count > 0:
-                await session.commit()
-                logger.info(f"Automatically completed {completed_count} campaigns")
-                
-            return {
-                "success": True,
-                "monitored_campaigns": len(active_campaigns),
-                "completed_campaigns": completed_count
-            }
+                    # Если все задачи успешные или нет задач вообще, завершаем кампанию
+                    if total_tasks > 0 and completed_tasks == total_tasks:
+                        campaign.status = "completed"
+                        campaign.finished_at = datetime.utcnow()
+                        completed_count += 1
+                        logger.info(
+                            f"Campaign {campaign.id} completed automatically "
+                            f"({completed_tasks}/{total_tasks} tasks successful)"
+                        )
+                        
+                if completed_count > 0:
+                    await session.commit()
+                    logger.info(f"Automatically completed {completed_count} campaigns")
+                    
+                return {
+                    "success": True,
+                    "monitored_campaigns": len(active_campaigns),
+                    "completed_campaigns": completed_count
+                }
+        
+        return _run_async(_run())
             
     except Exception as e:
         logger.error(f"Error in monitor_campaigns: {e}", exc_info=True)

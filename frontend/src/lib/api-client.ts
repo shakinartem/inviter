@@ -25,6 +25,14 @@ apiClient.interceptors.response.use(
       localStorage.removeItem("access_token");
       window.location.href = "/login";
     }
-    return Promise.reject(error);
+    if (!error.response) {
+      const msg = error.code === "ECONNABORTED" ? "Request timeout" : "Network Error";
+      return Promise.reject(new Error(msg));
+    }
+    const detail = error.response.data?.detail || error.response.data?.message || error.message || "Request failed";
+    const err = new Error(detail) as any;
+    err.response = error.response;
+    err.code = error.code;
+    return Promise.reject(err);
   },
 );

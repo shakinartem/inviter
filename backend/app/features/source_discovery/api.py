@@ -9,11 +9,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.security import get_current_active_user
 from app.db.session import get_db_session
 from app.features.auth.models import User
+from app.features.source_discovery.models import SourceCandidate
 from app.features.source_discovery.schemas import (
     AnalysisResult,
     SelectResult,
@@ -75,11 +78,22 @@ async def search_tgstat(
             detail=f"Search failed: {str(exc)[:500]}",
         )
 
+    # Load scores separately to avoid MissingGreenlet on lazy relationship
+    candidate_ids = [c.id for c in candidates]
+    scores_by_candidate: dict[UUID, int] = {}
+    if candidate_ids:
+        scores_stmt = (
+            select(SourceCandidate.id, SourceScore.total_score)
+            .join(SourceScore, SourceScore.source_candidate_id == SourceCandidate.id)
+            .where(SourceCandidate.id.in_(candidate_ids))
+        )
+        scores_result = await db_session.execute(scores_stmt)
+        for cid, total_score in scores_result.all():
+            scores_by_candidate[cid] = total_score
+
     items = []
     for c in candidates:
-        best_score = None
-        if c.scores:
-            best_score = max(s.total_score for s in c.scores)
+        best_score = scores_by_candidate.get(c.id)
         items.append(
             SourceCandidateListItem(
                 id=c.id,
@@ -199,11 +213,11 @@ async def analyze_source(
             detail=f"Analysis failed: {str(exc)[:500]}",
         )
 
-    # Get updated candidate
-    from app.features.source_discovery.models import SourceCandidate
-
+    # Get updated candidate with scores eagerly loaded
     result = await db_session.execute(
-        select(SourceCandidate).where(SourceCandidate.id == source_id)
+        select(SourceCandidate)
+        .where(SourceCandidate.id == source_id)
+        .options(selectinload(SourceCandidate.scores))
     )
     candidate = result.scalar_one()
 
