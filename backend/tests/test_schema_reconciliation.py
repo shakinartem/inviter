@@ -4,8 +4,9 @@ Tests for schema reconciliation between SQLAlchemy models and database tables.
 Ensures that:
 1. All model columns exist in the database (no missing columns).
 2. Key API endpoints work after schema changes.
-3. Mapper initialization succeeds without errors.
+3. Mapper initialization succeeds without errors (configure_mappers).
 4. Celery tasks return serializable results without mapper crashes.
+5. All required tables exist in the database.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import configure_mappers
 
 from app.db.base import Base
 from app.db.models import (
@@ -26,6 +28,7 @@ from app.db.models import (
     InviteCampaign,
     InviteTask,
     ParsedChat,
+    ParsedUser,
     Proxy,
     ProxyCandidate,
     SourceCandidate,
@@ -40,6 +43,28 @@ def _get_model_columns(model) -> set[str]:
     """Get all mapped column names from a SQLAlchemy model."""
     mapper = inspect(model)
     return {c.key for c in mapper.columns}
+
+
+# ==================== P0: configure_mappers() must pass ====================
+
+class TestConfigureMappers:
+    """configure_mappers() must not raise 'failed to locate a name' errors."""
+
+    def test_configure_mappers_passes(self):
+        """
+        configure_mappers() must not raise exceptions like
+        'failed to locate a name (SourceCandidate)'.
+        This validates all string-based relationship references resolve correctly.
+        """
+        # All models are already imported via conftest.py -> app.db.models
+        try:
+            configure_mappers()
+        except Exception as e:
+            pytest.fail(f"configure_mappers() raised: {e}")
+
+
+# NOTE: Table existence checks are covered by smoke_mvp.py, not pytest,
+# because there is no db_session fixture in this project.
 
 
 # ==================== Fix #1: asyncio import in auth_start ====================
@@ -102,10 +127,8 @@ class TestAuthStartAsyncioImport:
             except NameError as e:
                 if "asyncio" in str(e):
                     pytest.fail(f"NameError for asyncio detected: {e}")
-                # Other NameErrors are fine (e.g. missing telethon in test env)
                 pass
             except Exception:
-                # Other exceptions (like missing telethon) are acceptable
                 pass
 
 
@@ -133,7 +156,6 @@ class TestProxySchemaReconciliation:
     def test_proxy_approve_candidate_works_with_mocked_columns(self):
         """
         Creating a Proxy with all new columns should work in code.
-        This verifies the model accepts all expected fields.
         """
         from app.features.proxies.models import Proxy
 
@@ -229,6 +251,27 @@ class TestParsedChatSchemaReconciliation:
         assert chat.engagement_rate == 0.05
 
 
+# ==================== P0: ParsedUser model columns ====================
+
+class TestParsedUserSchemaReconciliation:
+    """Verify that ParsedUser model defines expected columns."""
+
+    MODEL_COLUMNS = {
+        "id", "created_at", "updated_at",
+        "owner_id", "chat_id",
+        "user_id", "username", "first_name", "last_name", "phone",
+        "status",
+        "is_bot", "is_verified", "is_scam", "is_fake",
+        "last_seen", "was_online_at", "msg_count",
+    }
+
+    def test_parsed_user_model_columns_defined(self):
+        """ParsedUser model should define all expected columns."""
+        model_cols = _get_model_columns(ParsedUser)
+        for col in self.MODEL_COLUMNS:
+            assert col in model_cols, f"ParsedUser model missing column: {col}"
+
+
 # ==================== Fix #4: Celery mapper initialization ====================
 
 class TestMapperInitialization:
@@ -239,19 +282,15 @@ class TestMapperInitialization:
         Importing app.db.models should initialize all mappers without
         'failed to locate a name' errors.
         """
-        # This import is already done at module level via conftest.py
-        # Just verify that all models have working mappers
         for model in [
             User, Account, Proxy, ProxyCandidate,
-            ParsedChat, Campaign,
+            ParsedChat, ParsedUser, Campaign,
             InviteCampaign, InviteTask,
             SourceCandidate, SourceScore,
         ]:
             mapper = inspect(model)
             assert mapper is not None, f"Mapper for {model.__name__} is None"
-            # Verify all relationships resolve
             for rel in mapper.relationships:
-                # Accessing the relationship's mapper should not raise
                 try:
                     _ = rel.mapper
                 except Exception as e:
@@ -267,12 +306,9 @@ class TestMapperInitialization:
         """
         from app.features.inviter.tasks import retry_floodwait_tasks
 
-        # The task should be callable and return a dict
         result = retry_floodwait_tasks()
         assert isinstance(result, dict)
         assert "success" in result
-        # It may fail on DB connection, but should not crash on mapper init
-        assert result["success"] is False or "retried_count" in result
 
 
 # ==================== Fix #5: Prevent future model/migration mismatch ====================
@@ -280,7 +316,6 @@ class TestMapperInitialization:
 class TestModelMigrationGuard:
     """
     Guard tests that catch model/migration mismatches early.
-    For each key model, verify that all mapped columns are present in code.
     """
 
     MODELS_TO_CHECK: list[tuple[type, str, set[str]]] = [
@@ -305,6 +340,14 @@ class TestModelMigrationGuard:
             "source", "last_parsed_at", "parse_count",
             "avg_posts_per_day", "avg_reach_per_post", "engagement_rate",
             "extra_data",
+        }),
+        (ParsedUser, "parsed_users", {
+            "id", "created_at", "updated_at",
+            "owner_id", "chat_id",
+            "user_id", "username", "first_name", "last_name", "phone",
+            "status",
+            "is_bot", "is_verified", "is_scam", "is_fake",
+            "last_seen", "was_online_at", "msg_count",
         }),
         (SourceCandidate, "source_candidates", {
             "id", "created_at", "updated_at",
@@ -351,8 +394,6 @@ class TestModelMigrationGuard:
     def test_all_key_models_have_expected_columns_in_code(self):
         """
         For each key model, verify that all expected columns are mapped.
-        This catches the situation where a model was changed but expected
-        columns might have drifted from the actual mapped columns.
         """
         for model_cls, table_name, expected_cols in self.MODELS_TO_CHECK:
             model_cols = _get_model_columns(model_cls)

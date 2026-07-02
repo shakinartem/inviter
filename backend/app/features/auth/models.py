@@ -10,13 +10,8 @@ from app.db.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
     from app.features.accounts.models import Account
-    # "Campaign" is legacy, not used by runtime relationships anymore.
-    # Keep it in TYPE_CHECKING only for circular-import safety, do not
-    # reference it in mapped relationships to avoid mapper initialization errors.
-    # from app.features.campaigns.models import Campaign
     from app.features.inviter.models import InviteCampaign
     from app.features.parser.models import ParsedChat
-    from app.features.proxies.candidate_models import ProxyCandidate
     from app.features.proxies.models import Proxy
 
 
@@ -32,7 +27,5 @@ class User(SQLAlchemyBaseUserTableUUID, TimestampMixin, Base):
     proxies: Mapped[list["Proxy"]] = relationship(back_populates="owner")
     parsed_chats: Mapped[list["ParsedChat"]] = relationship(back_populates="owner")
     invite_campaigns: Mapped[list["InviteCampaign"]] = relationship(back_populates="owner")
-    proxy_candidates: Mapped[list["ProxyCandidate"]] = relationship(back_populates="owner")
-    source_candidates: Mapped[list["SourceCandidate"]] = relationship(back_populates="owner")
 
 

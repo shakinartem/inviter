@@ -130,7 +130,7 @@ class SourceCandidate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         doc="Raw TGStat page data",
     )
 
-    owner = relationship("User", back_populates="source_candidates", lazy="selectin")
+    owner = relationship("User", lazy="selectin")
     scores: Mapped[list["SourceScore"]] = relationship(
         back_populates="source_candidate",
         cascade="all, delete-orphan",

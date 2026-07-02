@@ -142,7 +142,6 @@ class ProxyCandidate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     owner: Mapped["User"] = relationship(
-        back_populates="proxy_candidates",
         lazy="selectin",
         doc="Владелец кандидата",
     )
