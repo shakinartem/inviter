@@ -1,6 +1,6 @@
 from app.features.accounts.models import Account
 from app.features.auth.models import User
-from app.features.campaigns.models import Campaign
+from app.features.campaigns.models import Campaign  # noqa: E402
 from app.features.parser.models import ParsedChat, ParsedUser
 from app.features.proxies.candidate_models import ProxyCandidate
 from app.features.proxies.models import Proxy

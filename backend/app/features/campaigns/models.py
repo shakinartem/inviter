@@ -32,6 +32,9 @@ class Campaign(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    owner: Mapped["User"] = relationship(back_populates="campaigns")
+    # NOTE: back_populates="campaigns" removed because User model no longer has
+    # a `campaigns` relationship. The old Campaign model is kept for backward
+    # compatibility only (table exists, but no runtime relationships use it).
+    owner: Mapped["User"] = relationship()
     # NOTE: parsed_chats relationship removed — it's now handled by InviteCampaign/ParsedChat.
     # The old Campaign model is kept for backward compatibility only.
