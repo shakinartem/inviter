@@ -16,9 +16,19 @@ jobs:
       - name: Prepare production test env
         run: cp .env.production.example .env.production
 
-      - name: Audit production frontend dependencies
+      - name: Refresh and audit production frontend dependencies
         working-directory: frontend
-        run: npm audit --omit=dev --audit-level=high
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          npm audit --omit=dev --audit-level=high
+
+      - name: Upload audited frontend lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: audited-frontend-lockfile
+          path: frontend/package-lock.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Validate shell scripts
         run: bash -n deploy/backup.sh deploy/restore.sh deploy/smoke-test.sh
@@ -129,8 +139,12 @@ jobs:
           test -z "$(docker compose --env-file .env.production -f docker-compose.prod.yml port postgres 5432 2>/dev/null || true)"
           test -z "$(docker compose --env-file .env.production -f docker-compose.prod.yml port redis 6379 2>/dev/null || true)"
 
-      - name: Package validated source from tracked files only
-        run: git archive --format=zip --prefix=qualive-inviter/ -o qualive-inviter-production-ready.zip HEAD
+      - name: Package validated working tree from tracked files only
+        run: |
+          rm -rf .package-root
+          mkdir -p .package-root/qualive-inviter
+          git ls-files -z | tar --null -T - -cf - | tar -C .package-root/qualive-inviter -xf -
+          (cd .package-root && zip -qr ../qualive-inviter-production-ready.zip qualive-inviter)
 
       - name: Upload validated source archive
         uses: actions/upload-artifact@v4
