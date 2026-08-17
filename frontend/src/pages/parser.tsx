@@ -7,32 +7,47 @@ import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useEnrichCommunity } from "@/hooks/use-intelligence";
-import { useParsedChats, useParserStats, useParseSearch } from "@/hooks/use-parser";
+import { useParsedChats, useParserStats, useParseSearch, usePlatformDiscovery } from "@/hooks/use-parser";
 import type { ParsedChatListItem } from "@/types";
 
 const columnHelper = createColumnHelper<ParsedChatListItem>();
 
-type ParserSource = "telegram" | "tgstat" | "telemetr";
+type DiscoverySource = "telegram" | "discord" | "tgstat" | "telemetr";
 
 export default function ParserPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [search, setSearch] = useState("");
-  const [source, setSource] = useState<ParserSource>("telegram");
+  const [source, setSource] = useState<DiscoverySource>("telegram");
   const { data, isLoading } = useParsedChats({ search, limit: 500 });
   const { data: stats } = useParserStats();
   const parseSearch = useParseSearch();
+  const platformDiscovery = usePlatformDiscovery();
   const enrichCommunity = useEnrichCommunity();
 
+  const discoveryPending = parseSearch.isPending || platformDiscovery.isPending;
+
   const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
+    if (!searchQuery.trim() && source !== "discord") return;
     try {
-      await parseSearch.mutateAsync({
-        query: searchQuery.trim(),
-        source,
-        limit: 100,
-      });
+      if (source === "discord") {
+        await platformDiscovery.mutateAsync({
+          platform: "discord",
+          query: searchQuery.trim(),
+          limit: 100,
+        });
+      } else {
+        await parseSearch.mutateAsync({
+          query: searchQuery.trim(),
+          source,
+          limit: 100,
+        });
+      }
     } catch {
-      toast.error("Discovery failed");
+      toast.error(
+        source === "discord"
+          ? "Discord discovery failed. Check an active Discord connection and guild permissions."
+          : "Discovery failed",
+      );
     }
   };
 
@@ -50,7 +65,7 @@ export default function ParserPage() {
         `Analyzed ${result.audience_profiles} people · quality ${result.quality_score.toFixed(1)}`,
       );
     } catch {
-      toast.error("Community analysis failed. Check that an active account can access this community.");
+      toast.error("Community analysis failed. Check that an active connection can access this community.");
     }
   };
 
@@ -81,7 +96,7 @@ export default function ParserPage() {
       }),
       columnHelper.accessor("source", {
         header: "Source",
-        cell: (info) => info.getValue(),
+        cell: (info) => <span className="capitalize">{info.getValue().replaceAll("_", " ")}</span>,
       }),
       columnHelper.accessor("created_at", {
         header: "Found",
@@ -128,7 +143,11 @@ export default function ParserPage() {
         <div className="flex gap-3">
           <input
             className="flex-1 rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-accent"
-            placeholder="Enter niche or keywords (e.g. real estate Moscow, AI, trading)..."
+            placeholder={
+              source === "discord"
+                ? "Filter servers already accessible to your Discord connection (blank = all)…"
+                : "Enter niche or keywords (e.g. real estate Moscow, AI, trading)…"
+            }
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -136,20 +155,26 @@ export default function ParserPage() {
           <div className="flex gap-2">
             <select
               value={source}
-              onChange={(e) => setSource(e.target.value as ParserSource)}
+              onChange={(e) => setSource(e.target.value as DiscoverySource)}
               className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-accent"
             >
               <option value="telegram">Telegram Search</option>
+              <option value="discord">Discord Connections</option>
               <option value="tgstat">TGStat</option>
               <option value="telemetr">Telemetr</option>
             </select>
-            <Button onClick={handleSearch} disabled={!searchQuery.trim() || parseSearch.isPending}>
-              {parseSearch.isPending ? "Searching..." : "Search"}
+            <Button
+              onClick={handleSearch}
+              disabled={(source !== "discord" && !searchQuery.trim()) || discoveryPending}
+            >
+              {discoveryPending ? "Searching..." : "Search"}
             </Button>
           </div>
         </div>
         <p className="text-xs text-muted">
-          After discovery, analyze a community to create a deduplicated audience and activity snapshot.
+          {source === "discord"
+            ? "Discord discovery only searches servers the authorized bot/OAuth connection can already access; it does not scrape arbitrary Discord servers."
+            : "After discovery, analyze a community to create a deduplicated audience and activity snapshot."}
         </p>
       </div>
 
@@ -166,7 +191,7 @@ export default function ParserPage() {
       <DataTable
         columns={columns}
         data={chats}
-        loading={isLoading || parseSearch.isPending}
+        loading={isLoading || discoveryPending}
         pageSize={25}
       />
     </div>
