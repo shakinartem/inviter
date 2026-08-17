@@ -36,12 +36,17 @@ cat "$BACKUP_DIR/postgres.dump" | "${COMPOSE[@]}" exec -T postgres \
   pg_restore -U "${POSTGRES_USER:-inviter}" -d "${POSTGRES_DB:-inviter}" \
   --clean --if-exists --no-owner --no-privileges
 
-echo "Restoring Telegram sessions..."
+echo "Restoring Telegram sessions with runtime ownership..."
 SESSION_VOLUME="${COMPOSE_PROJECT_NAME:-qualive_inviter}_telegram_sessions"
-docker run --rm \
-  -v "$SESSION_VOLUME:/data" \
+BACKEND_IMAGE="qualive-inviter-backend:${IMAGE_TAG:-local}"
+docker run --rm --user root \
+  -v "$SESSION_VOLUME:/data/sessions" \
   -v "$(cd "$BACKUP_DIR" && pwd):/backup:ro" \
-  alpine:3.20 sh -c 'rm -rf /data/* /data/.[!.]* /data/..?* 2>/dev/null || true; tar xzf /backup/telegram-sessions.tar.gz -C /data'
+  "$BACKEND_IMAGE" sh -c '
+    rm -rf /data/sessions/* /data/sessions/.[!.]* /data/sessions/..?* 2>/dev/null || true
+    tar xzf /backup/telegram-sessions.tar.gz -C /data/sessions
+    chown -R app:app /data/sessions
+  '
 
 echo "Applying current migrations..."
 "${COMPOSE[@]}" run --rm migrate
