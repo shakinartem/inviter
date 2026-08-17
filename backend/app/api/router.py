@@ -5,6 +5,7 @@ from app.core.security import auth_backend, fastapi_users
 from app.features.accounts.api import router as accounts_router
 from app.features.auth.schemas import UserCreate, UserRead, UserUpdate
 from app.features.connectors.api import router as connectors_router
+from app.features.discovery.api import router as discovery_router
 from app.features.intelligence.api import router as intelligence_router
 from app.features.parser.api import router as parser_router
 from app.features.proxies.api import router as proxies_router
@@ -29,6 +30,7 @@ api_router.include_router(
 api_router.include_router(health_router, prefix="/health", tags=["health"])
 api_router.include_router(accounts_router, tags=["accounts"])
 api_router.include_router(connectors_router, tags=["connectors"])
+api_router.include_router(discovery_router, tags=["discovery"])
 api_router.include_router(intelligence_router, tags=["intelligence"])
 api_router.include_router(proxies_router, tags=["proxies"])
 api_router.include_router(inviter_router, tags=["inviter"])
