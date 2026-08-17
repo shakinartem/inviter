@@ -16,6 +16,7 @@ import {
   TrendingUp,
   Layers3,
   FlaskConical,
+  Calculator,
 } from "lucide-react";
 
 const navItems = [
@@ -25,6 +26,7 @@ const navItems = [
   { to: "/segments", icon: Target, label: "Opportunities" },
   { to: "/yield", icon: TrendingUp, label: "Expected Yield" },
   { to: "/portfolio", icon: Layers3, label: "Portfolio" },
+  { to: "/experiment-planner", icon: Calculator, label: "Experiment Planner" },
   { to: "/experiments", icon: FlaskConical, label: "Experiments" },
   { to: "/campaigns", icon: Send, label: "Campaigns" },
   { to: "/learning", icon: BrainCircuit, label: "Learning" },

@@ -15,6 +15,7 @@ import OutcomeSourcesPage from "@/pages/outcome-sources";
 import YieldForecastPage from "@/pages/yield-forecast";
 import OpportunityPortfolioPage from "@/pages/opportunity-portfolio";
 import ExperimentsPage from "@/pages/experiments";
+import ExperimentPlannerPage from "@/pages/experiment-planner";
 import LoginPage from "@/pages/login";
 
 const queryClient = new QueryClient({
@@ -49,6 +50,7 @@ export default function App() {
             <Route path="segments" element={<SegmentsPage />} />
             <Route path="yield" element={<YieldForecastPage />} />
             <Route path="portfolio" element={<OpportunityPortfolioPage />} />
+            <Route path="experiment-planner" element={<ExperimentPlannerPage />} />
             <Route path="experiments" element={<ExperimentsPage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
             <Route path="learning" element={<LearningPage />} />
