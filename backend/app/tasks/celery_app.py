@@ -6,12 +6,21 @@ celery_app = Celery(
     "inviter",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.features.inviter.tasks"],
+    include=[
+        "app.features.inviter.tasks",
+        "app.features.orchestration.tasks",
+    ],
 )
 
 celery_app.conf.update(
     task_track_started=True,
     timezone=settings.timezone,
     broker_connection_retry_on_startup=True,
-    beat_schedule={},
+    beat_schedule={
+        "orchestration-dispatch-due-jobs": {
+            "task": "orchestration.dispatch_due",
+            "schedule": 15.0,
+            "args": (100,),
+        },
+    },
 )

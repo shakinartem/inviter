@@ -34,10 +34,13 @@ export function useParseSearch() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (payload: ParserSearchPayload) => {
-      const { data } = await apiClient.post<ParsedChatResponse[]>("/parser/parse", payload);
+      const { data } = await apiClient.post<ParsedChatResponse[]>("/discovery/search", payload);
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["parsed-chats"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["parsed-chats"] });
+      qc.invalidateQueries({ queryKey: ["parser-stats"] });
+    },
   });
 }
 
@@ -47,6 +50,9 @@ export function useDeleteParsedChat() {
     mutationFn: async (id: string) => {
       await apiClient.delete(`/parser/chats/${id}`);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["parsed-chats"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["parsed-chats"] });
+      qc.invalidateQueries({ queryKey: ["parser-stats"] });
+    },
   });
 }

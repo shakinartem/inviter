@@ -8,14 +8,16 @@ import {
   Send,
   Settings,
   LogOut,
+  Brain,
 } from "lucide-react";
 
 const navItems = [
-  { to: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { to: "/", icon: LayoutDashboard, label: "Overview" },
+  { to: "/parser", icon: Search, label: "Discovery" },
+  { to: "/audience", icon: Brain, label: "Audience" },
+  { to: "/campaigns", icon: Send, label: "Campaigns" },
   { to: "/accounts", icon: Users, label: "Accounts" },
   { to: "/proxies", icon: Shield, label: "Proxies" },
-  { to: "/parser", icon: Search, label: "Parser" },
-  { to: "/campaigns", icon: Send, label: "Campaigns" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
@@ -27,15 +29,16 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-full w-60 flex-col border-r border-black/5 bg-white/80 backdrop-blur-sm">
-      {/* Logo */}
       <div className="flex h-14 items-center gap-2 border-b border-black/5 px-5">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink text-sm font-bold text-white">
-          T
+          Q
         </div>
-        <span className="text-sm font-semibold text-ink">Inviter Pro</span>
+        <div>
+          <span className="block text-sm font-semibold text-ink">Audience Intelligence</span>
+          <span className="block text-[10px] uppercase tracking-wide text-muted">Qualive Lab</span>
+        </div>
       </div>
 
-      {/* Navigation */}
       <nav className="flex-1 space-y-1 p-3">
         {navItems.map((item) => (
           <NavLink
@@ -57,7 +60,6 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* Logout */}
       <div className="border-t border-black/5 p-3">
         <button
           onClick={handleLogout}
