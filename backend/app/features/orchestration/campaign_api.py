@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_active_user
 from app.db.session import get_db_session
+from app.features.experiments.service import CampaignExperimentService
 from app.features.inviter.schemas import InviteCampaignResponse, InviteSettings
 from app.features.orchestration.destinations import CampaignDestinationService
 from app.features.segments.service import SegmentService
@@ -22,6 +23,7 @@ class CampaignCreateFromCommunityRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=160)
     target_community_id: UUID
     source_segment_id: UUID
+    holdout_percentage: float = Field(default=0.0, ge=0.0, le=50.0)
     notes: str | None = Field(default=None, max_length=2000)
     settings: InviteSettings = Field(default_factory=InviteSettings)
 
@@ -34,6 +36,7 @@ async def create_campaign_from_community(
 ) -> InviteCampaignResponse:
     destination_service = CampaignDestinationService(session)
     segment_service = SegmentService(session)
+    experiment_service = CampaignExperimentService(session)
     try:
         segment = await segment_service.get(user.id, payload.source_segment_id)
         if segment is None:
@@ -57,6 +60,15 @@ async def create_campaign_from_community(
                 "Current direct-invite campaign action is Telegram-only; use a Telegram Opportunity and destination"
             )
 
+        # Configure the randomized experiment now, but deliberately do not assign
+        # anybody yet. Assignment happens only at first planning when action
+        # budget and ranked candidate universe are known.
+        await experiment_service.create_configuration(
+            owner_id=user.id,
+            campaign_id=campaign.id,
+            holdout_percentage=payload.holdout_percentage,
+            commit=False,
+        )
         await segment_service.freeze_for_campaign(
             owner_id=user.id,
             segment_id=payload.source_segment_id,
