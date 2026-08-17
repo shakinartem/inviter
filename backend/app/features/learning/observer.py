@@ -13,7 +13,9 @@ from app.features.accounts.models import Account
 from app.features.connections.service import ConnectorAccountContext
 from app.features.connectors.defaults import register_default_connectors
 from app.features.connectors.registry import connector_registry
+from app.features.experiments.models import CampaignExperiment, ExperimentAssignment
 from app.features.intelligence.models import AudienceMember
+from app.features.learning.experiment_outcomes import ExperimentOutcomeService
 from app.features.learning.models import ActionFeatureSnapshot, OutcomeEvent
 from app.features.learning.observer_models import OutcomeObserverCursor
 from app.features.learning.service import OutcomeLearningService
@@ -28,12 +30,11 @@ AUTOMATIC_ENGAGEMENT_CONFIDENCE = 0.8
 
 
 class AutomaticOutcomeObserver:
-    """Observe voluntary post-action activity without re-reading full histories.
+    """Observe voluntary destination activity with incremental cursoring.
 
-    One connector read is performed per campaign/destination, then messages are
-    matched locally to eligible action jobs in that frozen campaign cohort. We
-    label only observed post-action activity (`messaged_destination`), never a
-    technical invite success and never causal business conversion.
+    Non-randomized campaigns preserve the original post-transport attribution.
+    Randomized campaigns observe treatment and holdout symmetrically from the
+    assignment timestamp and write engagement directly to the randomized unit.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -59,15 +60,11 @@ class AutomaticOutcomeObserver:
                 ActionFeatureSnapshot.first_transport_at.is_not(None),
                 ActionFeatureSnapshot.first_transport_at >= cutoff,
             )
-            .group_by(
-                ActionFeatureSnapshot.owner_id,
-                ActionFeatureSnapshot.campaign_id,
-            )
+            .group_by(ActionFeatureSnapshot.owner_id, ActionFeatureSnapshot.campaign_id)
             .order_by(func.max(ActionFeatureSnapshot.first_transport_at).desc())
             .limit(limit_campaigns)
         )
         campaigns = list(result.all())
-
         totals = {
             "campaigns_considered": len(campaigns),
             "campaigns_scanned": 0,
@@ -87,7 +84,6 @@ class AutomaticOutcomeObserver:
             except Exception:
                 totals["campaigns_failed"] += 1
                 continue
-
             if scan.get("skipped"):
                 totals["campaigns_skipped"] += 1
             else:
@@ -110,12 +106,11 @@ class AutomaticOutcomeObserver:
             return {"campaign_id": campaign_id, "skipped": True, "reason": "no_destination"}
         if not connector_registry.supports(destination.platform):
             return {"campaign_id": campaign_id, "skipped": True, "reason": "connector_unavailable"}
-
         connector = connector_registry.get(destination.platform)
         if not connector.capabilities.read_messages:
             return {"campaign_id": campaign_id, "skipped": True, "reason": "message_read_unsupported"}
 
-        eligible = await self._eligible_actions(
+        eligible = await self._eligible_units(
             owner_id=owner_id,
             campaign_id=campaign_id,
             lookback_days=lookback_days,
@@ -127,7 +122,6 @@ class AutomaticOutcomeObserver:
         cursor = await self._cursor(owner_id, campaign_id, destination.platform)
         if self._is_recently_running(cursor, now):
             return {"campaign_id": campaign_id, "skipped": True, "reason": "observer_already_running"}
-
         cursor.status = "running"
         cursor.last_run_at = now
         cursor.run_count = (cursor.run_count or 0) + 1
@@ -136,18 +130,15 @@ class AutomaticOutcomeObserver:
 
         since = self._scan_since(
             cursor_last_observed_at=cursor.last_observed_at,
-            earliest_transport_at=min(item["first_transport_at"] for item in eligible),
+            earliest_transport_at=min(item["start_at"] for item in eligible),
             now=now,
             lookback_days=lookback_days,
         )
-
         account = await self._account(owner_id, destination.platform)
         if account is None:
             return await self._fail_cursor(cursor, "No active connection available for outcome observer")
-
-        account_context: Any
         if account.platform == "telegram":
-            account_context = account
+            account_context: Any = account
         else:
             account_context = ConnectorAccountContext(
                 account=account,
@@ -175,26 +166,16 @@ class AutomaticOutcomeObserver:
         cursor.last_success_at = now
         cursor.messages_seen = (cursor.messages_seen or 0) + len(messages)
         cursor.outcomes_created = (cursor.outcomes_created or 0) + outcome_count
-
-        # If the connector returned fewer than the requested limit, it observed
-        # the whole [since, now] window, so advance to scan start even for a quiet
-        # chat. Keep only an overlap on the next scan for boundary safety.
         checkpoint = high_water
         if len(messages) < message_limit:
             checkpoint = now
             cursor.last_error = None
         else:
-            # Saturation is visible rather than silently pretending the entire
-            # window was consumed. Increasing message_limit or shortening cadence
-            # avoids losing attribution in extremely high-volume destinations.
-            cursor.last_error = (
-                f"Message limit {message_limit} reached; observer window may be saturated"
-            )
+            cursor.last_error = f"Message limit {message_limit} reached; observer window may be saturated"
         if checkpoint is not None:
             current = self._aware(cursor.last_observed_at) if cursor.last_observed_at else None
             cursor.last_observed_at = max(current, checkpoint) if current else checkpoint
         await self.session.commit()
-
         return {
             "campaign_id": campaign_id,
             "platform": destination.platform,
@@ -214,7 +195,7 @@ class AutomaticOutcomeObserver:
         )
         return list(result.scalars().all())
 
-    async def _eligible_actions(
+    async def _eligible_units(
         self,
         *,
         owner_id: UUID,
@@ -222,6 +203,47 @@ class AutomaticOutcomeObserver:
         lookback_days: int,
         now: datetime,
     ) -> list[dict[str, Any]]:
+        experiment_result = await self.session.execute(
+            select(CampaignExperiment).where(
+                CampaignExperiment.owner_id == owner_id,
+                CampaignExperiment.campaign_id == campaign_id,
+                CampaignExperiment.status == "assigned",
+            )
+        )
+        experiment = experiment_result.scalar_one_or_none()
+        if experiment is not None:
+            cutoff = now - timedelta(days=lookback_days)
+            already_observed = exists(
+                select(OutcomeEvent.id).where(
+                    OutcomeEvent.experiment_assignment_id == ExperimentAssignment.id,
+                    OutcomeEvent.stage == "engagement",
+                    OutcomeEvent.event_type == "messaged_destination",
+                    OutcomeEvent.source.like("%_observer"),
+                )
+            ).correlate(ExperimentAssignment)
+            result = await self.session.execute(
+                select(ExperimentAssignment, AudienceMember)
+                .join(AudienceMember, AudienceMember.id == ExperimentAssignment.audience_member_id)
+                .where(
+                    ExperimentAssignment.experiment_id == experiment.id,
+                    ExperimentAssignment.assigned_at >= cutoff,
+                    AudienceMember.is_bot.is_(False),
+                    ~already_observed,
+                )
+            )
+            return [
+                {
+                    "unit_id": assignment.id,
+                    "assignment_id": assignment.id,
+                    "job_id": None,
+                    "variant": assignment.variant,
+                    "audience_member_id": member.id,
+                    "external_user_id": member.external_user_id,
+                    "start_at": self._aware(assignment.assigned_at),
+                }
+                for assignment, member in result.all()
+            ]
+
         cutoff = now - timedelta(days=lookback_days)
         successful_transport = exists(
             select(OutcomeEvent.id).where(
@@ -238,7 +260,6 @@ class AutomaticOutcomeObserver:
                 OutcomeEvent.source.like("%_observer"),
             )
         ).correlate(ActionFeatureSnapshot)
-
         result = await self.session.execute(
             select(ActionFeatureSnapshot, ActionJob, AudienceMember)
             .join(ActionJob, ActionJob.id == ActionFeatureSnapshot.action_job_id)
@@ -254,17 +275,18 @@ class AutomaticOutcomeObserver:
                 ~already_auto_engaged,
             )
         )
-        items: list[dict[str, Any]] = []
-        for snapshot, job, member in result.all():
-            items.append(
-                {
-                    "job_id": job.id,
-                    "audience_member_id": member.id,
-                    "external_user_id": member.external_user_id,
-                    "first_transport_at": self._aware(snapshot.first_transport_at),
-                }
-            )
-        return items
+        return [
+            {
+                "unit_id": job.id,
+                "assignment_id": None,
+                "job_id": job.id,
+                "variant": None,
+                "audience_member_id": member.id,
+                "external_user_id": member.external_user_id,
+                "start_at": self._aware(snapshot.first_transport_at),
+            }
+            for snapshot, job, member in result.all()
+        ]
 
     async def _attribute_messages(
         self,
@@ -277,29 +299,27 @@ class AutomaticOutcomeObserver:
         by_external_user: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for item in eligible:
             by_external_user[str(item["external_user_id"])].append(item)
-        for actions in by_external_user.values():
-            actions.sort(key=lambda item: item["first_transport_at"], reverse=True)
+        for units in by_external_user.values():
+            units.sort(key=lambda item: item["start_at"], reverse=True)
 
         learning = OutcomeLearningService(self.session)
+        experiment_learning = ExperimentOutcomeService(self.session)
         outcomes_created = 0
         high_water: datetime | None = None
-
         normalized_messages: list[tuple[datetime, dict[str, Any]]] = []
         for message in messages:
             observed_at = self._normalize_datetime(message.get("created_at"))
-            if observed_at is None:
-                continue
-            normalized_messages.append((observed_at, message))
+            if observed_at is not None:
+                normalized_messages.append((observed_at, message))
         normalized_messages.sort(key=lambda pair: pair[0])
 
-        seen_jobs: set[UUID] = set()
+        seen_units: set[UUID] = set()
         for observed_at, message in normalized_messages:
             high_water = observed_at if high_water is None or observed_at > high_water else high_water
             external_user_id = message.get("external_user_id")
             external_message_id = message.get("external_message_id")
             if not external_user_id or not external_message_id:
                 continue
-
             source = f"{destination.platform}_observer"
             scoped_external_event_id = f"{destination.external_id}:{external_message_id}"
             dedupe_key = f"external:{source}:{scoped_external_event_id}"[:255]
@@ -312,43 +332,55 @@ class AutomaticOutcomeObserver:
             if existing_result.scalar_one_or_none() is not None:
                 continue
 
-            for action in by_external_user.get(str(external_user_id), []):
-                if action["job_id"] in seen_jobs:
+            for unit in by_external_user.get(str(external_user_id), []):
+                unit_id = unit["unit_id"]
+                if unit_id in seen_units or observed_at < unit["start_at"]:
                     continue
-                first_transport_at = action["first_transport_at"]
-                if observed_at < first_transport_at:
-                    continue
-
-                latency_seconds = max((observed_at - first_transport_at).total_seconds(), 0.0)
-                await learning.record_observed_outcome(
-                    owner_id=owner_id,
-                    action_job_id=action["job_id"],
-                    stage="engagement",
-                    event_type="messaged_destination",
-                    success=True,
-                    source=source,
-                    confidence=AUTOMATIC_ENGAGEMENT_CONFIDENCE,
-                    observed_at=observed_at,
-                    external_event_id=scoped_external_event_id,
-                    properties={
-                        "destination_external_id": destination.external_id,
-                        "external_message_id": str(external_message_id),
-                        "is_reply": bool(message.get("is_reply")),
-                        "latency_seconds": round(latency_seconds, 3),
-                        "attribution": "post_action_destination_activity",
-                    },
-                )
+                latency_seconds = max((observed_at - unit["start_at"]).total_seconds(), 0.0)
+                properties = {
+                    "destination_external_id": destination.external_id,
+                    "external_message_id": str(external_message_id),
+                    "is_reply": bool(message.get("is_reply")),
+                    "latency_seconds": round(latency_seconds, 3),
+                    "attribution": (
+                        "post_randomization_destination_activity"
+                        if unit["assignment_id"] is not None
+                        else "post_action_destination_activity"
+                    ),
+                    "experiment_variant": unit.get("variant"),
+                }
+                if unit["assignment_id"] is not None:
+                    await experiment_learning.record_assignment_outcome(
+                        owner_id=owner_id,
+                        experiment_assignment_id=unit["assignment_id"],
+                        stage="engagement",
+                        event_type="messaged_destination",
+                        success=True,
+                        source=source,
+                        confidence=AUTOMATIC_ENGAGEMENT_CONFIDENCE,
+                        observed_at=observed_at,
+                        external_event_id=scoped_external_event_id,
+                        properties=properties,
+                    )
+                else:
+                    await learning.record_observed_outcome(
+                        owner_id=owner_id,
+                        action_job_id=unit["job_id"],
+                        stage="engagement",
+                        event_type="messaged_destination",
+                        success=True,
+                        source=source,
+                        confidence=AUTOMATIC_ENGAGEMENT_CONFIDENCE,
+                        observed_at=observed_at,
+                        external_event_id=scoped_external_event_id,
+                        properties=properties,
+                    )
                 outcomes_created += 1
-                seen_jobs.add(action["job_id"])
+                seen_units.add(unit_id)
                 break
-
         return outcomes_created, high_water
 
-    async def _destination(
-        self,
-        owner_id: UUID,
-        campaign_id: UUID,
-    ) -> CampaignDestination | None:
+    async def _destination(self, owner_id: UUID, campaign_id: UUID) -> CampaignDestination | None:
         result = await self.session.execute(
             select(CampaignDestination).where(
                 CampaignDestination.owner_id == owner_id,
@@ -366,20 +398,12 @@ class AutomaticOutcomeObserver:
                 Account.is_active.is_(True),
                 Account.status == "active",
             )
-            .order_by(
-                Account.health_score.desc(),
-                Account.last_used_at.asc().nullsfirst(),
-            )
+            .order_by(Account.health_score.desc(), Account.last_used_at.asc().nullsfirst())
             .limit(1)
         )
         return result.scalar_one_or_none()
 
-    async def _cursor(
-        self,
-        owner_id: UUID,
-        campaign_id: UUID,
-        platform: str,
-    ) -> OutcomeObserverCursor:
+    async def _cursor(self, owner_id: UUID, campaign_id: UUID, platform: str) -> OutcomeObserverCursor:
         result = await self.session.execute(
             select(OutcomeObserverCursor).where(
                 OutcomeObserverCursor.owner_id == owner_id,
@@ -403,11 +427,7 @@ class AutomaticOutcomeObserver:
         await self.session.refresh(cursor)
         return cursor
 
-    async def _fail_cursor(
-        self,
-        cursor: OutcomeObserverCursor,
-        error: str,
-    ) -> dict[str, Any]:
+    async def _fail_cursor(self, cursor: OutcomeObserverCursor, error: str) -> dict[str, Any]:
         cursor.status = "error"
         cursor.last_error = error[:1000]
         await self.session.commit()
@@ -439,9 +459,7 @@ class AutomaticOutcomeObserver:
         earliest = max(AutomaticOutcomeObserver._aware(earliest_transport_at), lower_bound)
         if cursor_last_observed_at is None:
             return earliest
-        overlapped = AutomaticOutcomeObserver._aware(cursor_last_observed_at) - timedelta(
-            seconds=CURSOR_OVERLAP_SECONDS
-        )
+        overlapped = AutomaticOutcomeObserver._aware(cursor_last_observed_at) - timedelta(seconds=CURSOR_OVERLAP_SECONDS)
         return max(overlapped, earliest)
 
     @staticmethod
