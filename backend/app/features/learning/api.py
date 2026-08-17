@@ -8,12 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import get_current_active_user
 from app.db.session import get_db_session
 from app.features.learning.feedback import FeedbackQueueService
+from app.features.learning.observer import AutomaticOutcomeObserver
 from app.features.learning.schemas import (
     CalibrationResponse,
     FeedbackActionListResponse,
     FeedbackActionResponse,
     LearningOverviewResponse,
     ObservedOutcomeCreate,
+    ObserverCursorResponse,
+    ObserverScanResponse,
     OutcomeEventListResponse,
     OutcomeEventResponse,
 )
@@ -70,6 +73,42 @@ async def feedback_actions(
         skip=skip,
         limit=limit,
     )
+
+
+@router.get("/observer/status", response_model=list[ObserverCursorResponse])
+async def observer_status(
+    user=Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_db_session),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[ObserverCursorResponse]:
+    items = await AutomaticOutcomeObserver(session).status(owner_id=user.id, limit=limit)
+    return [ObserverCursorResponse.model_validate(item) for item in items]
+
+
+@router.post(
+    "/observer/campaigns/{campaign_id}/scan",
+    response_model=ObserverScanResponse,
+)
+async def scan_campaign_outcomes(
+    campaign_id: UUID,
+    user=Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_db_session),
+    lookback_days: int = Query(default=30, ge=1, le=90),
+    message_limit: int = Query(default=5000, ge=100, le=20000),
+) -> ObserverScanResponse:
+    try:
+        result = await AutomaticOutcomeObserver(session).scan_campaign(
+            owner_id=user.id,
+            campaign_id=campaign_id,
+            lookback_days=lookback_days,
+            message_limit=message_limit,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Outcome observer scan failed: {str(exc)[:500]}",
+        ) from exc
+    return ObserverScanResponse(**result)
 
 
 @router.get("/outcomes", response_model=OutcomeEventListResponse)

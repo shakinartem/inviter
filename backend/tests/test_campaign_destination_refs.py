@@ -3,11 +3,8 @@ from __future__ import annotations
 import unittest
 from uuid import uuid4
 
-from telethon.tl.types import InputChannel, InputUser
+from telethon.tl.types import InputChannel, InputPeerChannel, InputPeerChat, InputUser
 
-# SQLAlchemy resolves string relationships lazily when the first mapped object is
-# instantiated. Import the application's model registry so isolated unit tests
-# see the same complete mapper graph as app startup and Alembic.
 from app.db import models as _models  # noqa: F401
 from app.features.connectors.telegram import TelegramConnector
 from app.features.orchestration.destinations import CampaignDestination
@@ -35,16 +32,10 @@ class CampaignDestinationReferenceTests(unittest.TestCase):
 
     def test_private_supergroup_uses_channel_access_hash(self) -> None:
         destination = self._destination()
-        self.assertEqual(
-            destination.connector_ref,
-            "channel:123456789:987654321",
-        )
+        self.assertEqual(destination.connector_ref, "channel:123456789:987654321")
 
     def test_basic_group_uses_chat_reference(self) -> None:
-        destination = self._destination(
-            community_type="group",
-            access_hash=None,
-        )
+        destination = self._destination(community_type="group", access_hash=None)
         self.assertEqual(destination.connector_ref, "chat:123456789")
 
     def test_user_reference_builds_input_user(self) -> None:
@@ -64,6 +55,20 @@ class CampaignDestinationReferenceTests(unittest.TestCase):
         kind, ref = TelegramConnector._destination_ref("chat:123")
         self.assertEqual(kind, "chat")
         self.assertEqual(ref, 123)
+
+    def test_private_channel_reference_is_readable_without_entity_cache(self) -> None:
+        ref = TelegramConnector._readable_community_ref("channel:123:456")
+        self.assertIsInstance(ref, InputPeerChannel)
+        self.assertEqual(ref.channel_id, 123)
+        self.assertEqual(ref.access_hash, 456)
+
+    def test_basic_group_reference_is_readable_without_entity_cache(self) -> None:
+        ref = TelegramConnector._readable_community_ref("chat:123")
+        self.assertIsInstance(ref, InputPeerChat)
+        self.assertEqual(ref.chat_id, 123)
+
+    def test_public_username_read_reference_is_unchanged(self) -> None:
+        self.assertEqual(TelegramConnector._readable_community_ref("@my_group"), "@my_group")
 
 
 if __name__ == "__main__":
