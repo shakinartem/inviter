@@ -14,8 +14,16 @@ import LearningPage from "@/pages/learning";
 import OutcomeSourcesPage from "@/pages/outcome-sources";
 import YieldForecastPage from "@/pages/yield-forecast";
 import OpportunityPortfolioPage from "@/pages/opportunity-portfolio";
+import CausalPortfolioPage from "@/pages/causal-portfolio";
 import ExperimentsPage from "@/pages/experiments";
 import ExperimentPlannerPage from "@/pages/experiment-planner";
+import IncrementalYieldPage from "@/pages/incremental-yield";
+import ContextualYieldPage from "@/pages/contextual-yield";
+import IncrementalValuePage from "@/pages/incremental-value";
+import ContextualValuePage from "@/pages/contextual-value";
+import CapacityAllocationPage from "@/pages/capacity-allocation";
+import CapacityEconomicsPage from "@/pages/capacity-economics";
+import EvidenceHealthPage from "@/pages/evidence-health";
 import LoginPage from "@/pages/login";
 
 const queryClient = new QueryClient({
@@ -50,8 +58,16 @@ export default function App() {
             <Route path="segments" element={<SegmentsPage />} />
             <Route path="yield" element={<YieldForecastPage />} />
             <Route path="portfolio" element={<OpportunityPortfolioPage />} />
+            <Route path="causal-portfolio" element={<CausalPortfolioPage />} />
             <Route path="experiment-planner" element={<ExperimentPlannerPage />} />
             <Route path="experiments" element={<ExperimentsPage />} />
+            <Route path="incremental-yield" element={<IncrementalYieldPage />} />
+            <Route path="contextual-yield" element={<ContextualYieldPage />} />
+            <Route path="incremental-value" element={<IncrementalValuePage />} />
+            <Route path="contextual-value" element={<ContextualValuePage />} />
+            <Route path="evidence-health" element={<EvidenceHealthPage />} />
+            <Route path="capacity-allocation" element={<CapacityAllocationPage />} />
+            <Route path="capacity-economics" element={<CapacityEconomicsPage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
             <Route path="learning" element={<LearningPage />} />
             <Route path="outcome-sources" element={<OutcomeSourcesPage />} />
