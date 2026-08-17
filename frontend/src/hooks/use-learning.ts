@@ -62,6 +62,32 @@ export type FeedbackActionList = {
   limit: number;
 };
 
+export type ObserverCursor = {
+  id: string;
+  campaign_id: string;
+  platform: string;
+  status: string;
+  last_observed_at: string | null;
+  last_run_at: string | null;
+  last_success_at: string | null;
+  last_error: string | null;
+  messages_seen: number;
+  outcomes_created: number;
+  run_count: number;
+};
+
+export type ObserverScanResult = {
+  campaign_id: string;
+  platform?: string | null;
+  since?: string | null;
+  messages_seen: number;
+  outcomes_created: number;
+  last_observed_at?: string | null;
+  skipped: boolean;
+  reason?: string | null;
+  error?: string | null;
+};
+
 export function useLearningOverview() {
   return useQuery({
     queryKey: ["learning-overview"],
@@ -99,6 +125,37 @@ export function useFeedbackActions(limit = 100) {
       return data;
     },
     refetchInterval: 15_000,
+  });
+}
+
+export function useObserverStatus(limit = 100) {
+  return useQuery({
+    queryKey: ["learning-observer-status", limit],
+    queryFn: async () => {
+      const { data } = await apiClient.get<ObserverCursor[]>("/learning/observer/status", {
+        params: { limit },
+      });
+      return data;
+    },
+    refetchInterval: 15_000,
+  });
+}
+
+export function useScanCampaignObserver() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (campaignId: string) => {
+      const { data } = await apiClient.post<ObserverScanResult>(
+        `/learning/observer/campaigns/${campaignId}/scan`,
+      );
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["learning-observer-status"] });
+      qc.invalidateQueries({ queryKey: ["learning-actions"] });
+      qc.invalidateQueries({ queryKey: ["learning-overview"] });
+      qc.invalidateQueries({ queryKey: ["learning-calibration"] });
+    },
   });
 }
 
