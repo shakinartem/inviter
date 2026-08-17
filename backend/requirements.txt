@@ -1,6 +1,7 @@
 alembic==1.16.1
 asyncpg==0.30.0
 celery[redis]==5.5.3
+cryptography==45.0.4
 fastapi==0.115.12
 fastapi-users[sqlalchemy]==14.0.1
 fastapi-users-db-sqlalchemy==7.0.0
