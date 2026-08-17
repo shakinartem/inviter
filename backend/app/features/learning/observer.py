@@ -63,8 +63,6 @@ class AutomaticOutcomeObserver:
                 ActionFeatureSnapshot.owner_id,
                 ActionFeatureSnapshot.campaign_id,
             )
-            # Newer campaigns are observed first when several actions may compete
-            # for attribution of the same downstream behavior.
             .order_by(func.max(ActionFeatureSnapshot.first_transport_at).desc())
             .limit(limit_campaigns)
         )
@@ -175,12 +173,26 @@ class AutomaticOutcomeObserver:
 
         cursor.status = "idle"
         cursor.last_success_at = now
-        cursor.last_error = None
         cursor.messages_seen = (cursor.messages_seen or 0) + len(messages)
         cursor.outcomes_created = (cursor.outcomes_created or 0) + outcome_count
-        if high_water is not None:
+
+        # If the connector returned fewer than the requested limit, it observed
+        # the whole [since, now] window, so advance to scan start even for a quiet
+        # chat. Keep only an overlap on the next scan for boundary safety.
+        checkpoint = high_water
+        if len(messages) < message_limit:
+            checkpoint = now
+            cursor.last_error = None
+        else:
+            # Saturation is visible rather than silently pretending the entire
+            # window was consumed. Increasing message_limit or shortening cadence
+            # avoids losing attribution in extremely high-volume destinations.
+            cursor.last_error = (
+                f"Message limit {message_limit} reached; observer window may be saturated"
+            )
+        if checkpoint is not None:
             current = self._aware(cursor.last_observed_at) if cursor.last_observed_at else None
-            cursor.last_observed_at = max(current, high_water) if current else high_water
+            cursor.last_observed_at = max(current, checkpoint) if current else checkpoint
         await self.session.commit()
 
         return {
@@ -217,7 +229,16 @@ class AutomaticOutcomeObserver:
                 OutcomeEvent.stage == "transport",
                 OutcomeEvent.success.is_(True),
             )
-        )
+        ).correlate(ActionFeatureSnapshot)
+        already_auto_engaged = exists(
+            select(OutcomeEvent.id).where(
+                OutcomeEvent.action_job_id == ActionFeatureSnapshot.action_job_id,
+                OutcomeEvent.stage == "engagement",
+                OutcomeEvent.event_type == "messaged_destination",
+                OutcomeEvent.source.like("%_observer"),
+            )
+        ).correlate(ActionFeatureSnapshot)
+
         result = await self.session.execute(
             select(ActionFeatureSnapshot, ActionJob, AudienceMember)
             .join(ActionJob, ActionJob.id == ActionFeatureSnapshot.action_job_id)
@@ -230,6 +251,7 @@ class AutomaticOutcomeObserver:
                 ActionJob.attempts > 0,
                 AudienceMember.is_bot.is_(False),
                 successful_transport,
+                ~already_auto_engaged,
             )
         )
         items: list[dict[str, Any]] = []
