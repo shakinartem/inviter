@@ -43,6 +43,20 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
                 f"direct_invite is not enabled for destination platform: {destination.platform}"
             )
 
+        # Run the same cheap preconditions the base planner will enforce before we
+        # persist a randomized assignment. A failed/no-account start must not
+        # consume the campaign's one immutable experiment budget.
+        campaign = await self._get_campaign(owner_id, campaign_id)
+        if campaign is None:
+            raise ValueError("Campaign not found")
+        if campaign.status not in {"draft", "active", "paused"}:
+            raise ValueError(f"Campaign cannot be planned from status: {campaign.status}")
+        if campaign.source_type == "uploaded_list":
+            raise ValueError("uploaded_list source is not connected to Audience Intelligence yet")
+        preflight_accounts = await self._get_accounts(owner_id, account_ids)
+        if not preflight_accounts:
+            raise ValueError("No active accounts available for campaign")
+
         experiment_service = CampaignExperimentService(self.session)
         experiment = await experiment_service.get_for_campaign(
             owner_id=owner_id,
@@ -52,12 +66,6 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
         planner_limit = limit
 
         if experiment is not None:
-            # Build/restore assignment before the base planner creates ActionJobs.
-            # Candidate ranking comes from the frozen Opportunity cohort. Holdout
-            # units never enter the planner and therefore never get an ActionJob.
-            campaign = await self._get_campaign(owner_id, campaign_id)
-            if campaign is None:
-                raise ValueError("Campaign not found")
             planner_limit = experiment_service.required_pool_size(
                 action_budget=limit,
                 holdout_percentage=experiment.holdout_percentage,
@@ -136,7 +144,6 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
         return result
 
     async def execute_job(self, job_id: UUID) -> dict[str, Any]:
-        """Execute through the base engine while preserving unbiased learning data."""
         job_result = await self.session.execute(select(ActionJob).where(ActionJob.id == job_id))
         job = job_result.scalar_one_or_none()
         learning = OutcomeLearningService(self.session)
