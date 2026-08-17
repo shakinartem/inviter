@@ -1,4 +1,5 @@
 from app.features.accounts.models import Account
+from app.features.accounts.capacity_models import AccountCapacitySnapshot
 from app.features.auth.models import User
 from app.features.campaigns.models import Campaign
 from app.features.parser.models import ParsedChat
@@ -21,6 +22,7 @@ from app.features.segments.models import (
 __all__ = (
     "User",
     "Account",
+    "AccountCapacitySnapshot",
     "Proxy",
     "Campaign",
     "ParsedChat",
