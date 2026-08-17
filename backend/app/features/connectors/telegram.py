@@ -19,7 +19,14 @@ from telethon.errors import (
 from telethon.tl.functions.channels import InviteToChannelRequest
 from telethon.tl.functions.contacts import SearchRequest
 from telethon.tl.functions.messages import AddChatUserRequest
-from telethon.tl.types import Channel, Chat, InputChannel, InputUser
+from telethon.tl.types import (
+    Channel,
+    Chat,
+    InputChannel,
+    InputPeerChannel,
+    InputPeerChat,
+    InputUser,
+)
 
 from app.features.accounts.client_manager import TelegramClientManager
 from app.features.connectors.base import ConnectorCapabilities, MessengerConnector
@@ -100,9 +107,6 @@ class TelegramConnector(MessengerConnector):
             normalized_query = query.strip()
 
             if not normalized_query:
-                # An empty query is intentionally treated as "sync my chats".
-                # This exposes groups already accessible to the authorized account,
-                # including private destinations, without asking users for raw IDs.
                 async for dialog in client.iter_dialogs(limit=min(max(limit, 1), 500)):
                     chat = getattr(dialog, "entity", None)
                     if not isinstance(chat, (Channel, Chat)):
@@ -136,8 +140,9 @@ class TelegramConnector(MessengerConnector):
     ) -> list[dict[str, Any]]:
         client = await self.client_manager.get_client(account)
         try:
+            community_ref = self._readable_community_ref(community)
             members: list[dict[str, Any]] = []
-            async for user in client.iter_participants(community, limit=limit):
+            async for user in client.iter_participants(community_ref, limit=limit):
                 status = getattr(user, "status", None)
                 was_online = getattr(status, "was_online", None)
                 access_hash = getattr(user, "access_hash", None)
@@ -175,8 +180,9 @@ class TelegramConnector(MessengerConnector):
 
         client = await self.client_manager.get_client(account)
         try:
+            community_ref = self._readable_community_ref(community)
             messages: list[dict[str, Any]] = []
-            async for message in client.iter_messages(community, limit=limit):
+            async for message in client.iter_messages(community_ref, limit=limit):
                 created_at = getattr(message, "date", None)
                 if created_at is None:
                     continue
@@ -201,6 +207,23 @@ class TelegramConnector(MessengerConnector):
             return messages
         finally:
             await self.client_manager.release_client(account.id)
+
+    @staticmethod
+    def _readable_community_ref(value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        ref = value.strip()
+        if ref.startswith("channel:"):
+            parts = ref.split(":", 2)
+            if len(parts) != 3:
+                raise ValueError("Malformed Telegram channel reference")
+            return InputPeerChannel(channel_id=int(parts[1]), access_hash=int(parts[2]))
+        if ref.startswith("chat:"):
+            parts = ref.split(":", 1)
+            if len(parts) != 2:
+                raise ValueError("Malformed Telegram chat reference")
+            return InputPeerChat(chat_id=int(parts[1]))
+        return ref
 
     @staticmethod
     def _target_ref(value: str | int) -> str | int | InputUser:
