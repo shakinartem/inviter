@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { createColumnHelper } from "@tanstack/react-table";
-import { Pause, Play, Plus, RefreshCw, Search, Square, Target, Trash2 } from "lucide-react";
+import { FlaskConical, Pause, Play, Plus, RefreshCw, Search, Square, Target, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import {
   useStartCampaign,
   useStopCampaign,
 } from "@/hooks/use-campaigns";
+import { useExperiments } from "@/hooks/use-experiments";
 import { useParsedChats, usePlatformDiscovery } from "@/hooks/use-parser";
 import { useSegments } from "@/hooks/use-segments";
 import type { InviteCampaignListItem } from "@/types";
@@ -27,6 +28,7 @@ export default function CampaignsPage() {
   const [planLimit, setPlanLimit] = useState("1000");
 
   const { data: campaigns, isLoading } = useCampaigns({ skip: 0, limit: 500 });
+  const { data: experiments } = useExperiments();
   const { data: segments, isLoading: segmentsLoading } = useSegments({ active_only: true, platform: "telegram" });
   const { data: syncedChats, isLoading: chatsLoading } = useParsedChats({
     source: "telegram_dialogs",
@@ -43,8 +45,13 @@ export default function CampaignsPage() {
     title: "",
     source_segment_id: "",
     target_community_id: "",
+    holdout_percentage: "10",
   });
 
+  const experimentByCampaign = useMemo(
+    () => new Map((experiments ?? []).map((experiment) => [experiment.campaign_id, experiment])),
+    [experiments],
+  );
   const destinations = useMemo(
     () =>
       (syncedChats?.items ?? []).filter((chat) =>
@@ -62,11 +69,7 @@ export default function CampaignsPage() {
 
   const handleSyncChats = async () => {
     try {
-      const items = await syncChats.mutateAsync({
-        platform: "telegram",
-        query: "",
-        limit: 200,
-      });
+      const items = await syncChats.mutateAsync({ platform: "telegram", query: "", limit: 200 });
       const groups = items.filter((chat) => ["group", "supergroup", "chat"].includes(chat.chat_type ?? ""));
       toast.success(`Synced ${groups.length} Telegram groups`);
     } catch {
@@ -77,14 +80,16 @@ export default function CampaignsPage() {
   const handleCreate = async () => {
     if (!form.title.trim() || !form.source_segment_id || !form.target_community_id) return;
     try {
+      const holdout = Math.max(0, Math.min(50, Number(form.holdout_percentage) || 0));
       await createCampaign.mutateAsync({
         title: form.title.trim(),
         source_segment_id: form.source_segment_id,
         target_community_id: form.target_community_id,
+        holdout_percentage: holdout,
       });
-      setForm({ title: "", source_segment_id: "", target_community_id: "" });
+      setForm({ title: "", source_segment_id: "", target_community_id: "", holdout_percentage: "10" });
       setShowCreate(false);
-      toast.success("Campaign created with a frozen Opportunity cohort");
+      toast.success(holdout > 0 ? `Campaign created · ${holdout}% causal holdout configured` : "Campaign created without holdout");
     } catch {
       toast.error("Failed to create campaign. Refresh the Opportunity and resync a private destination if needed.");
     }
@@ -92,17 +97,25 @@ export default function CampaignsPage() {
 
   const handleStart = async (campaign: InviteCampaignListItem) => {
     try {
+      const experiment = experimentByCampaign.get(campaign.id);
+      const requestedLimit = experiment?.action_budget ?? (Number(planLimit) || 1000);
       const result = await startCampaign.mutateAsync({
         id: campaign.id,
         payload: {
-          limit: Number(planLimit) || 1000,
+          limit: requestedLimit,
           min_activity_score: 0,
           min_readiness_score: 0,
         },
       });
-      toast.success(`Campaign started · ${result.planned ?? 0} actions planned from frozen cohort`);
+      if (result.experiment_id) {
+        toast.success(
+          `Campaign started · ${result.planned} actions · ${result.holdout_count ?? 0} randomized holdout`,
+        );
+      } else {
+        toast.success(`Campaign started · ${result.planned} actions planned from frozen cohort`);
+      }
     } catch {
-      toast.error("Could not start campaign. Check the frozen Opportunity, destination and active Telegram accounts.");
+      toast.error("Could not start campaign. If a randomized experiment was already assigned, its original action budget is immutable.");
     }
   };
 
@@ -156,6 +169,26 @@ export default function CampaignsPage() {
           </span>
         ),
       }),
+      columnHelper.display({
+        id: "experiment",
+        header: "Causal holdout",
+        cell: (info) => {
+          const experiment = experimentByCampaign.get(info.row.original.id);
+          if (!experiment) return <span className="text-xs text-muted">Off</span>;
+          return (
+            <div className="text-xs">
+              <div className="flex items-center gap-1 font-medium text-ink">
+                <FlaskConical className="h-3.5 w-3.5" /> {experiment.holdout_percentage.toFixed(0)}%
+              </div>
+              <p className="mt-0.5 text-[10px] text-muted">
+                {experiment.status === "assigned"
+                  ? `${experiment.treatment_count} treatment · ${experiment.holdout_count} holdout · budget ${experiment.action_budget}`
+                  : "assigns on first Start"}
+              </p>
+            </div>
+          );
+        },
+      }),
       columnHelper.accessor("created_at", {
         header: "Created",
         cell: (info) => new Date(info.getValue()).toLocaleDateString(),
@@ -193,7 +226,7 @@ export default function CampaignsPage() {
         },
       }),
     ],
-    [startCampaign.isPending, pauseCampaign.isPending, stopCampaign.isPending],
+    [experimentByCampaign, startCampaign.isPending, pauseCampaign.isPending, stopCampaign.isPending],
   );
 
   const filteredCampaigns = (campaigns ?? []).filter((campaign) =>
@@ -214,7 +247,7 @@ export default function CampaignsPage() {
 
       <div className="rounded-xl border border-black/5 bg-white p-4 shadow-sm">
         <label className="block max-w-xs space-y-1 text-xs font-medium text-muted">
-          Max actions to schedule
+          Max treatment actions to schedule
           <input
             className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
             type="number"
@@ -225,7 +258,7 @@ export default function CampaignsPage() {
           />
         </label>
         <p className="mt-2 text-xs text-muted">
-          Activity/intent/readiness thresholds belong to the Opportunity definition. Campaign execution does not silently re-score or expand its frozen cohort.
+          This becomes the immutable action budget when a randomized holdout is assigned. Paused experiments reuse their original budget automatically.
         </p>
       </div>
 
@@ -235,7 +268,7 @@ export default function CampaignsPage() {
             <div>
               <h3 className="text-sm font-semibold text-ink">New Campaign</h3>
               <p className="mt-1 text-xs text-muted">
-                Opportunity + Destination → Action. The selected Opportunity is copied into an immutable campaign cohort at creation time.
+                Opportunity + Destination → Action. A causal holdout receives no action and measures what would have happened anyway.
               </p>
             </div>
             <Button variant="outline" size="sm" onClick={handleSyncChats} disabled={syncChats.isPending}>
@@ -243,72 +276,40 @@ export default function CampaignsPage() {
               {syncChats.isPending ? "Syncing..." : "Sync my Telegram chats"}
             </Button>
           </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <input
-              className="rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-accent"
-              placeholder="Campaign title *"
-              value={form.title}
-              onChange={(event) => setForm({ ...form, title: event.target.value })}
-            />
-            <select
-              className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-accent"
-              value={form.source_segment_id}
-              onChange={(event) => setForm({ ...form, source_segment_id: event.target.value })}
-              disabled={segmentsLoading}
-            >
+          <div className="grid gap-3 md:grid-cols-4">
+            <input className="rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-accent" placeholder="Campaign title *" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
+            <select className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-accent" value={form.source_segment_id} onChange={(event) => setForm({ ...form, source_segment_id: event.target.value })} disabled={segmentsLoading}>
               <option value="">Select Opportunity *</option>
-              {availableSegments.map((segment) => (
-                <option key={segment.id} value={segment.id}>
-                  {segment.name} · {segment.matched_count.toLocaleString()} people
-                </option>
-              ))}
+              {availableSegments.map((segment) => <option key={segment.id} value={segment.id}>{segment.name} · {segment.matched_count.toLocaleString()} people</option>)}
             </select>
-            <select
-              className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-accent"
-              value={form.target_community_id}
-              onChange={(event) => setForm({ ...form, target_community_id: event.target.value })}
-              disabled={chatsLoading}
-            >
+            <select className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-accent" value={form.target_community_id} onChange={(event) => setForm({ ...form, target_community_id: event.target.value })} disabled={chatsLoading}>
               <option value="">Select destination group *</option>
-              {destinations.map((chat) => (
-                <option key={chat.id} value={chat.id}>
-                  {chat.title ?? chat.username ?? `Telegram group ${chat.id}`}
-                  {chat.username ? ` (@${chat.username})` : " (private)"}
-                </option>
-              ))}
+              {destinations.map((chat) => <option key={chat.id} value={chat.id}>{chat.title ?? chat.username ?? `Telegram group ${chat.id}`}{chat.username ? ` (@${chat.username})` : " (private)"}</option>)}
             </select>
+            <label className="space-y-1 text-[10px] font-medium uppercase tracking-wide text-muted">
+              Causal holdout %
+              <input type="number" min={0} max={50} step={1} className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm normal-case text-ink" value={form.holdout_percentage} onChange={(event) => setForm({ ...form, holdout_percentage: event.target.value })} />
+            </label>
+          </div>
+          <div className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-muted">
+            <strong className="text-ink">Holdout is deliberate reach cost.</strong> At 10%, the platform expands the ranked experiment pool so the treatment group can still target the requested action budget when enough eligible people exist. Set 0% to disable causal measurement.
           </div>
           {!segmentsLoading && availableSegments.length === 0 && (
-            <p className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-muted">
-              No materialized Telegram Opportunity yet. <Link to="/segments" className="font-medium text-ink underline">Create and refresh an Opportunity Segment</Link> first.
-            </p>
+            <p className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-muted">No materialized Telegram Opportunity yet. <Link to="/segments" className="font-medium text-ink underline">Create and refresh an Opportunity Segment</Link> first.</p>
           )}
           {!chatsLoading && destinations.length === 0 && (
-            <p className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-muted">
-              No synced Telegram groups yet. Click “Sync my Telegram chats” after connecting an active Telegram account.
-            </p>
+            <p className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-muted">No synced Telegram groups yet. Click “Sync my Telegram chats” after connecting an active Telegram account.</p>
           )}
           <div className="flex justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowCreate(false)}>Cancel</Button>
-            <Button
-              size="sm"
-              onClick={handleCreate}
-              disabled={!form.title.trim() || !form.source_segment_id || !form.target_community_id || createCampaign.isPending}
-            >
-              {createCampaign.isPending ? "Freezing cohort…" : "Create Campaign"}
-            </Button>
+            <Button size="sm" onClick={handleCreate} disabled={!form.title.trim() || !form.source_segment_id || !form.target_community_id || createCampaign.isPending}>{createCampaign.isPending ? "Freezing cohort…" : "Create Campaign"}</Button>
           </div>
         </div>
       )}
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-        <input
-          className="w-full rounded-lg border border-black/10 bg-white py-2 pl-10 pr-4 text-sm outline-none focus:border-accent"
-          placeholder="Search campaigns..."
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
+        <input className="w-full rounded-lg border border-black/10 bg-white py-2 pl-10 pr-4 text-sm outline-none focus:border-accent" placeholder="Search campaigns..." value={search} onChange={(event) => setSearch(event.target.value)} />
       </div>
 
       <DataTable columns={columns} data={filteredCampaigns} loading={isLoading} pageSize={25} />
