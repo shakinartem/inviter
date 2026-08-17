@@ -5,6 +5,10 @@ from uuid import uuid4
 
 from telethon.tl.types import InputChannel, InputUser
 
+# SQLAlchemy resolves string relationships lazily when the first mapped object is
+# instantiated. Import the application's model registry so isolated unit tests
+# see the same complete mapper graph as app startup and Alembic.
+from app.db import models as _models  # noqa: F401
 from app.features.connectors.telegram import TelegramConnector
 from app.features.orchestration.destinations import CampaignDestination
 
