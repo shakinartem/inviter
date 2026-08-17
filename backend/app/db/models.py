@@ -8,6 +8,7 @@ from app.features.intelligence.models import AudienceMember, CommunityMembership
 from app.features.learning.models import ActionFeatureSnapshot, OutcomeEvent
 from app.features.learning.observer_models import OutcomeObserverCursor
 from app.features.learning.webhook_models import OutcomeWebhookSource
+from app.features.experiments.models import CampaignExperiment, ExperimentAssignment
 from app.features.orchestration.destinations import CampaignDestination
 from app.features.orchestration.models import ActionJob
 from app.features.segments.models import (
@@ -34,6 +35,8 @@ __all__ = (
     "OutcomeEvent",
     "OutcomeObserverCursor",
     "OutcomeWebhookSource",
+    "CampaignExperiment",
+    "ExperimentAssignment",
     "CampaignDestination",
     "ActionJob",
     "AudienceSegment",
