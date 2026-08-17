@@ -9,6 +9,7 @@ import {
   Settings,
   LogOut,
   Brain,
+  BrainCircuit,
   Cable,
 } from "lucide-react";
 
@@ -17,6 +18,7 @@ const navItems = [
   { to: "/parser", icon: Search, label: "Discovery" },
   { to: "/audience", icon: Brain, label: "Audience" },
   { to: "/campaigns", icon: Send, label: "Campaigns" },
+  { to: "/learning", icon: BrainCircuit, label: "Learning" },
   { to: "/connections", icon: Cable, label: "Connections" },
   { to: "/accounts", icon: Users, label: "Telegram Accounts" },
   { to: "/proxies", icon: Shield, label: "Proxies" },

@@ -8,13 +8,14 @@ from sqlalchemy import select
 from app.features.accounts.models import Account
 from app.features.intelligence.models import AudienceMember
 from app.features.inviter.models import InviteCampaign
+from app.features.learning.service import OutcomeLearningService
 from app.features.orchestration.destinations import CampaignDestinationService
 from app.features.orchestration.models import ActionJob
 from app.features.orchestration.service import OrchestrationService
 
 
 class ConnectionAwareOrchestrationService(OrchestrationService):
-    """Bind actions to compatible connections and reproducible connector refs."""
+    """Bind actions to compatible connections, stable refs and learning labels."""
 
     async def plan_campaign(
         self,
@@ -75,6 +76,28 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
 
             await self.session.commit()
 
+        return result
+
+    async def execute_job(self, job_id: UUID) -> dict[str, Any]:
+        """Execute through the base engine while preserving unbiased learning data."""
+        job_result = await self.session.execute(select(ActionJob).where(ActionJob.id == job_id))
+        job = job_result.scalar_one_or_none()
+        learning = OutcomeLearningService(self.session)
+
+        # Freeze the feature vector before the connector mutates action state.
+        # A snapshot with no later transport event is excluded from calibration,
+        # so account/campaign cancellations do not become false negative labels.
+        if (
+            job is not None
+            and job.status not in {"success", "failed", "cancelled"}
+            and job.attempts == 0
+        ):
+            await learning.ensure_action_snapshot(job.id)
+
+        result = await super().execute_job(job_id)
+        code = str(result.get("code") or "")
+        if job is not None and not code.startswith("ALREADY_"):
+            await learning.record_transport_result(job.id, result)
         return result
 
     async def _get_accounts(
