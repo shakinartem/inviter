@@ -201,7 +201,15 @@ class ConnectionService:
                 "external_account_id": account.external_account_id,
                 "username": account.username,
                 "error": account.status_message,
-                "capabilities": connector.capabilities.as_dict(),
+                "capabilities": account.capabilities or connector.capabilities.as_dict(),
+            }
+
+        resolved_capabilities = result.get("capabilities")
+        if not isinstance(resolved_capabilities, dict):
+            resolved_capabilities = connector.capabilities.as_dict()
+        else:
+            resolved_capabilities = {
+                str(key): bool(value) for key, value in resolved_capabilities.items()
             }
 
         account.external_account_id = str(
@@ -210,7 +218,7 @@ class ConnectionService:
         account.username = result.get("username") or account.username
         account.first_name = result.get("first_name") or account.first_name
         account.last_name = result.get("last_name") or account.last_name
-        account.capabilities = connector.capabilities.as_dict()
+        account.capabilities = resolved_capabilities
         account.status = "active" if result.get("ok") else "error"
         account.status_message = None if result.get("ok") else str(result.get("error") or "Check failed")[:500]
         account.health_score = 100.0 if result.get("ok") else max(account.health_score - 10.0, 0.0)
@@ -228,7 +236,7 @@ class ConnectionService:
             "external_account_id": account.external_account_id,
             "username": account.username,
             "error": account.status_message,
-            "capabilities": connector.capabilities.as_dict(),
+            "capabilities": resolved_capabilities,
         }
 
     async def delete(self, owner_id: UUID, account_id: UUID) -> bool:
