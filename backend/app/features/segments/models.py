@@ -70,7 +70,7 @@ class CampaignAudienceSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     campaign_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("invite_campaigns.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+        PG_UUID(as_uuid=True), ForeignKey("invite_campaigns.id", ondelete="CASCADE"), nullable=False, index=True
     )
     segment_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("audience_segments.id", ondelete="RESTRICT"), nullable=False, index=True
