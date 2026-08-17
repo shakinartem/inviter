@@ -44,6 +44,37 @@ export function useParseSearch() {
   });
 }
 
+export function usePlatformDiscovery() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      platform,
+      query,
+      accountId,
+      limit = 100,
+    }: {
+      platform: string;
+      query: string;
+      accountId?: string | null;
+      limit?: number;
+    }) => {
+      const { data } = await apiClient.post<ParsedChatResponse[]>(
+        `/discovery/platforms/${platform}/search`,
+        {
+          query,
+          account_id: accountId ?? null,
+          limit,
+        },
+      );
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["parsed-chats"] });
+      qc.invalidateQueries({ queryKey: ["parser-stats"] });
+    },
+  });
+}
+
 export function useDeleteParsedChat() {
   const qc = useQueryClient();
   return useMutation({
