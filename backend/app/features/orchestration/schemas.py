@@ -23,6 +23,12 @@ class CampaignPlanResponse(BaseModel):
     first_scheduled_at: datetime | None
     last_scheduled_at: datetime | None
     status: str | None = None
+    experiment_id: UUID | None = None
+    experiment_status: str | None = None
+    action_budget: int | None = None
+    candidate_pool_size: int | None = None
+    treatment_count: int | None = None
+    holdout_count: int | None = None
 
 
 class ActionJobResponse(BaseModel):
