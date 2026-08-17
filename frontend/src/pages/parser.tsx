@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { useEnrichCommunity } from "@/hooks/use-intelligence";
+import { useEnrichCommunity, useIntentScan } from "@/hooks/use-intelligence";
 import { useParsedChats, useParserStats, useParseSearch, usePlatformDiscovery } from "@/hooks/use-parser";
 import type { ParsedChatListItem } from "@/types";
 
@@ -23,8 +23,10 @@ export default function ParserPage() {
   const parseSearch = useParseSearch();
   const platformDiscovery = usePlatformDiscovery();
   const enrichCommunity = useEnrichCommunity();
+  const intentScan = useIntentScan();
 
   const discoveryPending = parseSearch.isPending || platformDiscovery.isPending;
+  const intelligencePending = enrichCommunity.isPending || intentScan.isPending;
 
   const handleSearch = async () => {
     if (!searchQuery.trim() && source !== "discord") return;
@@ -53,7 +55,7 @@ export default function ParserPage() {
 
   const handleEnrich = async (community: ParsedChatListItem) => {
     try {
-      const result = await enrichCommunity.mutateAsync({
+      const enrichment = await enrichCommunity.mutateAsync({
         communityId: community.id,
         payload: {
           member_limit: 2_000,
@@ -61,11 +63,17 @@ export default function ParserPage() {
           lookback_days: 30,
         },
       });
+      const intent = await intentScan.mutateAsync({
+        communityId: community.id,
+        lookbackDays: 30,
+        messageLimit: 10_000,
+        minimumScore: 12,
+      });
       toast.success(
-        `Analyzed ${result.audience_profiles} people · quality ${result.quality_score.toFixed(1)}`,
+        `Analyzed ${enrichment.audience_profiles} people · quality ${enrichment.quality_score.toFixed(1)} · ${intent.signals_created} new intent signals`,
       );
     } catch {
-      toast.error("Community analysis failed. Check that an active connection can access this community.");
+      toast.error("Community intelligence failed. Check message/member permissions for the active connection.");
     }
   };
 
@@ -109,16 +117,16 @@ export default function ParserPage() {
           <Button
             size="sm"
             variant="outline"
-            disabled={enrichCommunity.isPending}
+            disabled={intelligencePending}
             onClick={() => handleEnrich(info.row.original)}
           >
             <Sparkles className="mr-1 h-3.5 w-3.5" />
-            {enrichCommunity.isPending ? "Analyzing..." : "Analyze audience"}
+            {intelligencePending ? "Analyzing..." : "Analyze audience + intent"}
           </Button>
         ),
       }),
     ],
-    [enrichCommunity.isPending],
+    [intelligencePending],
   );
 
   const chats = data?.items ?? [];
@@ -131,7 +139,7 @@ export default function ParserPage() {
           <p className="mt-1 text-sm text-muted">
             {stats
               ? `${stats.total_chats} communities · ${stats.total_parses} discovery runs`
-              : "Search communities, then measure the audience behind them"}
+              : "Search communities, then measure activity and purchase intent"}
           </p>
         </div>
       </div>
@@ -174,7 +182,7 @@ export default function ParserPage() {
         <p className="text-xs text-muted">
           {source === "discord"
             ? "Discord discovery only searches servers the authorized bot/OAuth connection can already access; it does not scrape arbitrary Discord servers."
-            : "After discovery, analyze a community to create a deduplicated audience and activity snapshot."}
+            : "Analysis creates a deduplicated audience, activity snapshot, and versioned intent signals without persisting raw message bodies."}
         </p>
       </div>
 
