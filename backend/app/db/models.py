@@ -5,6 +5,7 @@ from app.features.parser.models import ParsedChat
 from app.features.proxies.models import Proxy
 from app.features.inviter.models import InviteCampaign, InviteTask, InviteLog
 from app.features.intelligence.models import AudienceMember, CommunityMembership, CommunitySnapshot, IntentSignal
+from app.features.orchestration.destinations import CampaignDestination
 from app.features.orchestration.models import ActionJob
 
 __all__ = (
@@ -20,5 +21,6 @@ __all__ = (
     "AudienceMember",
     "CommunityMembership",
     "IntentSignal",
+    "CampaignDestination",
     "ActionJob",
 )
