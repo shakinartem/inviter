@@ -6,6 +6,7 @@ import DashboardPage from "@/pages/dashboard";
 import AccountsPage from "@/pages/accounts";
 import ProxiesPage from "@/pages/proxies";
 import ParserPage from "@/pages/parser";
+import AudiencePage from "@/pages/audience";
 import CampaignsPage from "@/pages/campaigns";
 import LoginPage from "@/pages/login";
 
@@ -45,6 +46,7 @@ export default function App() {
             <Route path="accounts" element={<AccountsPage />} />
             <Route path="proxies" element={<ProxiesPage />} />
             <Route path="parser" element={<ParserPage />} />
+            <Route path="audience" element={<AudiencePage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
