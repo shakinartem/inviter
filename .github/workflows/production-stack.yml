@@ -38,6 +38,32 @@ jobs:
           test "$(docker inspect -f '{{.State.Status}}' "$migrate_id")" = "exited"
           test "$(docker inspect -f '{{.State.ExitCode}}' "$migrate_id")" = "0"
 
+      - name: Wait for backend readiness
+        run: |
+          backend_id="$(docker compose --env-file .env.production -f docker-compose.prod.yml ps -q backend)"
+          test -n "$backend_id"
+          for attempt in $(seq 1 45); do
+            running="$(docker inspect -f '{{.State.Running}}' "$backend_id")"
+            if [[ "$running" != "true" ]]; then
+              docker logs "$backend_id" || true
+              echo "Backend container stopped before becoming healthy" >&2
+              exit 1
+            fi
+            health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$backend_id")"
+            echo "backend health attempt $attempt: $health"
+            if [[ "$health" == "healthy" ]]; then
+              exit 0
+            fi
+            if [[ "$health" == "unhealthy" ]]; then
+              docker logs "$backend_id" || true
+              exit 1
+            fi
+            sleep 2
+          done
+          docker logs "$backend_id" || true
+          echo "Backend did not become healthy in time" >&2
+          exit 1
+
       - name: Verify backend health
         run: docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read().decode())"
 
