@@ -112,11 +112,12 @@ export default function CampaignsPage() {
       }),
       columnHelper.accessor("target_chat_title", {
         header: "Destination",
-        cell: (info) => info.getValue() ?? info.row.original.target_chat_username ?? String(info.row.original.target_chat_id),
+        cell: (info) => info.getValue() ?? info.row.original.target_chat_username ?? "Configured chat",
       }),
-      columnHelper.accessor("source_type", {
+      columnHelper.display({
+        id: "audience",
         header: "Audience",
-        cell: (info) => (info.getValue() === "parsed_list" ? "Ranked audience" : info.getValue()),
+        cell: () => "Ranked audience",
       }),
       columnHelper.accessor("created_at", {
         header: "Created",
