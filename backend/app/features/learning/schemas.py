@@ -29,6 +29,7 @@ class OutcomeEventResponse(BaseModel):
     id: UUID
     owner_id: UUID
     action_job_id: UUID | None
+    experiment_assignment_id: UUID | None = None
     campaign_id: UUID
     audience_member_id: UUID
     platform: str
