@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from telethon.tl.functions.contacts import SearchRequest
@@ -115,10 +116,50 @@ class TelegramConnector(MessengerConnector):
                         "is_verified": bool(getattr(user, "verified", False)),
                         "is_scam": bool(getattr(user, "scam", False)),
                         "is_fake": bool(getattr(user, "fake", False)),
-                        "last_seen": was_online.isoformat() if was_online else None,
+                        "last_seen": was_online,
                     }
                 )
             return members
+        finally:
+            await self.client_manager.release_client(account.id)
+
+    async def get_recent_messages(
+        self,
+        community: Any,
+        *,
+        account: Any,
+        since: datetime,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+
+        client = await self.client_manager.get_client(account)
+        try:
+            messages: list[dict[str, Any]] = []
+            async for message in client.iter_messages(community, limit=limit):
+                created_at = getattr(message, "date", None)
+                if created_at is None:
+                    continue
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                if created_at < since:
+                    break
+
+                sender_id = getattr(message, "sender_id", None)
+                messages.append(
+                    {
+                        "platform": self.platform,
+                        "external_message_id": str(message.id),
+                        "external_user_id": str(sender_id) if sender_id is not None else None,
+                        "created_at": created_at,
+                        "text": getattr(message, "message", None) or "",
+                        "is_reply": getattr(message, "reply_to_msg_id", None) is not None,
+                        "views": getattr(message, "views", None),
+                        "forwards": getattr(message, "forwards", None),
+                    }
+                )
+            return messages
         finally:
             await self.client_manager.release_client(account.id)
 
