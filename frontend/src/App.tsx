@@ -11,6 +11,7 @@ import AudiencePage from "@/pages/audience";
 import SegmentsPage from "@/pages/segments";
 import CampaignsPage from "@/pages/campaigns";
 import LearningPage from "@/pages/learning";
+import OutcomeSourcesPage from "@/pages/outcome-sources";
 import LoginPage from "@/pages/login";
 
 const queryClient = new QueryClient({
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="segments" element={<SegmentsPage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
             <Route path="learning" element={<LearningPage />} />
+            <Route path="outcome-sources" element={<OutcomeSourcesPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
