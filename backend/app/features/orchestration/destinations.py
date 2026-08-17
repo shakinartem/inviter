@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index, String, UniqueConstraint, select
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, UniqueConstraint, select
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -40,6 +40,11 @@ class CampaignDestination(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __table_args__ = (
         UniqueConstraint("campaign_id", name="uq_campaign_destination_campaign"),
+        CheckConstraint(
+            "NOT (platform = 'telegram' AND community_type IN ('channel', 'supergroup') "
+            "AND COALESCE(username, '') = '' AND COALESCE(access_hash, '') = '')",
+            name="ck_campaign_destination_resolvable_telegram",
+        ),
         Index("ix_campaign_destinations_owner_platform", "owner_id", "platform"),
     )
 
@@ -85,8 +90,15 @@ class CampaignDestinationService:
         platform = str(metadata.get("platform") or "telegram").strip().lower()
         external_id = str(metadata.get("external_id") or abs(chat.chat_id))
 
-        if platform == "telegram" and chat.chat_type not in {"group", "supergroup", "chat"}:
-            raise ValueError("Telegram campaign destination must be a group or supergroup, not a broadcast channel")
+        if platform == "telegram":
+            if chat.chat_type not in {"group", "supergroup", "chat"}:
+                raise ValueError(
+                    "Telegram campaign destination must be a group or supergroup, not a broadcast channel"
+                )
+            if chat.chat_type == "supergroup" and not chat.username and not chat.access_hash:
+                raise ValueError(
+                    "Private Telegram supergroup is missing access data. Sync Telegram chats again before using it as a destination."
+                )
 
         config = {
             "daily_limit_per_account": 30,
