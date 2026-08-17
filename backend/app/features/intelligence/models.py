@@ -52,6 +52,7 @@ class AudienceMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     username: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     first_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    platform_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     is_bot: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
