@@ -17,12 +17,18 @@ branch_labels = None
 depends_on = None
 
 
+def _base_columns() -> list[sa.Column]:
+    return [
+        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    ]
+
+
 def upgrade() -> None:
     op.create_table(
         "community_snapshots",
-        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        *_base_columns(),
         sa.Column("owner_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("parsed_chat_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("captured_at", sa.DateTime(timezone=True), nullable=False),
@@ -50,9 +56,7 @@ def upgrade() -> None:
 
     op.create_table(
         "audience_members",
-        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        *_base_columns(),
         sa.Column("owner_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("platform", sa.String(length=32), nullable=False),
         sa.Column("external_user_id", sa.String(length=128), nullable=False),
@@ -74,15 +78,17 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("owner_id", "platform", "external_user_id", name="uq_audience_member_identity"),
     )
-    for column in ("owner_id", "platform", "external_user_id", "username", "is_blacklisted", "last_activity_at", "activity_score", "relevance_score", "quality_score", "intent_score", "readiness_score"):
+    for column in (
+        "owner_id", "platform", "external_user_id", "username", "is_blacklisted",
+        "last_activity_at", "activity_score", "relevance_score", "quality_score",
+        "intent_score", "readiness_score",
+    ):
         op.create_index(f"ix_audience_members_{column}", "audience_members", [column])
     op.create_index("ix_audience_members_owner_readiness", "audience_members", ["owner_id", "readiness_score"])
 
     op.create_table(
         "community_memberships",
-        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        *_base_columns(),
         sa.Column("audience_member_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("parsed_chat_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("first_seen_at", sa.DateTime(timezone=True), nullable=True),
