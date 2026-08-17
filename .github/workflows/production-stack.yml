@@ -81,6 +81,16 @@ jobs:
           assert payload.get('access_token')
           PY
 
+      - name: Verify Telegram session volume and backup snapshot
+        run: |
+          docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend sh -c "printf session-persistence-ok > /data/sessions/ci-sentinel"
+          bash deploy/backup.sh
+          latest="$(ls -1dt backups/* | head -n 1)"
+          test -f "$latest/postgres.dump"
+          test -f "$latest/SHA256SUMS"
+          tar tzf "$latest/telegram-sessions.tar.gz" | grep -q 'ci-sentinel'
+          docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend test -f /data/sessions/ci-sentinel
+
       - name: Verify static frontend health
         run: docker compose --env-file .env.production -f docker-compose.prod.yml exec -T frontend wget -q -O - http://127.0.0.1/healthz
 
