@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.features.accounts.credentials import credential_vault
 from app.features.accounts.models import Account
 from app.features.connections.service import ConnectorAccountContext
+from app.features.intelligence.models import AudienceMember
 from app.features.intelligence.service import IntelligenceService
 
 
@@ -76,3 +77,38 @@ class ConnectionAwareIntelligenceService(IntelligenceService):
             account=account,
             credentials=credential_vault.decrypt(account.credential_payload_encrypted),
         )
+
+    async def _upsert_members(
+        self,
+        *,
+        owner_id: UUID,
+        platform: str,
+        members: list[dict[str, Any]],
+        activity: dict[str, dict[str, Any]],
+    ) -> dict[str, AudienceMember]:
+        profiles = await super()._upsert_members(
+            owner_id=owner_id,
+            platform=platform,
+            members=members,
+            activity=activity,
+        )
+
+        # Keep platform-specific transport identifiers (Telegram access_hash,
+        # future connector IDs, etc.) out of generic profile columns while still
+        # making actions reproducible across worker accounts.
+        for member_data in members:
+            raw_external_id = member_data.get("external_user_id")
+            if raw_external_id is None:
+                continue
+            profile = profiles.get(str(raw_external_id))
+            if profile is None:
+                continue
+            incoming = member_data.get("platform_data")
+            if not isinstance(incoming, dict):
+                continue
+            merged = dict(profile.platform_data or {})
+            merged.update({key: value for key, value in incoming.items() if value is not None})
+            profile.platform_data = merged or None
+
+        await self.session.flush()
+        return profiles
