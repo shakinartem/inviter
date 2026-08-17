@@ -1,7 +1,7 @@
 """add canonical campaign destinations
 
 Revision ID: 20260817_000005
-Revises: 20260817_000004
+Revises: 20260817_000004a
 Create Date: 2026-08-17
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = "20260817_000005"
-down_revision = "20260817_000004"
+down_revision = "20260817_000004a"
 branch_labels = None
 depends_on = None
 
@@ -50,7 +50,8 @@ def upgrade() -> None:
     )
 
     # Backfill legacy Telegram campaigns so the new scheduler can resolve their
-    # destination through the same platform-neutral table.
+    # destination through the same platform-neutral table. Parser schema drift is
+    # normalized in the preceding 000004a revision.
     op.execute(
         """
         INSERT INTO campaign_destinations (
