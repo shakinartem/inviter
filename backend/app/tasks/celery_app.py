@@ -9,6 +9,7 @@ celery_app = Celery(
     include=[
         "app.features.inviter.tasks",
         "app.features.orchestration.tasks",
+        "app.features.learning.tasks",
     ],
 )
 
@@ -21,6 +22,11 @@ celery_app.conf.update(
             "task": "orchestration.dispatch_due",
             "schedule": 15.0,
             "args": (100,),
+        },
+        "learning-observe-engagement": {
+            "task": "learning.observe_engagement",
+            "schedule": 300.0,
+            "args": (50, 30, 5000),
         },
     },
 )
