@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.router import api_router
 from app.core.bootstrap import ensure_dev_admin
@@ -23,8 +24,15 @@ app = FastAPI(
     version=settings.app_version,
     debug=settings.debug,
     lifespan=lifespan,
+    docs_url="/docs" if settings.docs_enabled else None,
+    redoc_url="/redoc" if settings.docs_enabled else None,
+    openapi_url="/openapi.json" if settings.docs_enabled else None,
 )
 
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=settings.allowed_hosts,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
