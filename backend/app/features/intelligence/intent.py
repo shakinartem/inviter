@@ -10,9 +10,13 @@ from typing import Iterable
 MODEL_VERSION = "intent-lexical-v1"
 
 _WORD_RE = re.compile(r"[\wа-яё]+", re.IGNORECASE)
+_MONEY_RE = re.compile(
+    r"(?:\b\d[\d\s.,]{0,12}\s?(?:тыс|млн|миллион|руб|р\.|usd|eur)\b|[₽$€]\s?\d[\d\s.,]{0,12})",
+    re.IGNORECASE,
+)
 
-# This is deliberately a transparent bootstrap model. It creates labelled,
-# versioned evidence that can later train/calibrate a statistical or LLM scorer.
+# Transparent bootstrap model. It creates labelled/versioned evidence that can
+# later train and calibrate a statistical or LLM scorer without losing history.
 DIMENSIONS: dict[str, tuple[tuple[str, ...], float]] = {
     "transaction": (
         (
@@ -43,8 +47,8 @@ DIMENSIONS: dict[str, tuple[tuple[str, ...], float]] = {
     ),
     "budget_price": (
         (
-            "цена", "стоимость", "сколько стоит", "бюджет", "до ", "от ", "руб", "₽",
-            "ипотека", "рассрочка", "кредит", "ставка", "платеж",
+            "цена", "стоимость", "сколько стоит", "бюджет", "руб", "₽", "ипотека",
+            "рассрочка", "кредит", "ставка", "платеж", "платёж",
             "price", "cost", "how much", "budget", "quote", "mortgage", "financing",
             "monthly payment",
         ),
@@ -110,6 +114,19 @@ def _topic_tokens(topic: str | None) -> set[str]:
     }
 
 
+def _match_topic_terms(topic_terms: set[str], message_tokens: set[str]) -> list[str]:
+    matched: set[str] = set(topic_terms & message_tokens)
+    # Lightweight morphology tolerance for RU/EN inflections. Only long terms are
+    # prefix-matched so short generic words do not create false relevance.
+    for topic_term in topic_terms:
+        if topic_term in matched or len(topic_term) < 5:
+            continue
+        prefix = topic_term[: max(4, min(7, len(topic_term) - 2))]
+        if any(token.startswith(prefix) for token in message_tokens if len(token) >= 5):
+            matched.add(topic_term)
+    return sorted(matched)
+
+
 def score_message(
     text: str,
     *,
@@ -126,23 +143,24 @@ def score_message(
         matched = [phrase for phrase in phrases if phrase in normalized]
         if not matched:
             continue
-        # Multiple independent phrases strengthen a dimension without allowing
-        # repetitive keyword stuffing to dominate the score.
         strength = min(1.0, 0.70 + 0.15 * (len(set(matched)) - 1))
         matched_dimensions[dimension] = sorted(set(matched))[:8]
         dimension_scores[dimension] = max_points * strength
+
+    money_matches = sorted(set(match.group(0).strip() for match in _MONEY_RE.finditer(text)))[:6]
+    if money_matches:
+        matched_dimensions.setdefault("budget_price", []).extend(money_matches)
+        dimension_scores["budget_price"] = max(dimension_scores.get("budget_price", 0.0), 11.0)
 
     topic_terms = _topic_tokens(topic)
     message_tokens = {
         token.casefold().replace("ё", "е") for token in _WORD_RE.findall(normalized)
     }
-    matched_topic_terms = sorted(topic_terms & message_tokens)
+    matched_topic_terms = _match_topic_terms(topic_terms, message_tokens)
     if topic_terms:
         topic_ratio = len(matched_topic_terms) / max(len(topic_terms), 1)
         topic_points = min(20.0, topic_ratio * 20.0)
     else:
-        # Without explicit campaign/topic context, generic behavioral signals are
-        # still useful but receive less certainty.
         topic_points = 5.0 if matched_dimensions else 0.0
 
     question_points = 4.0 if "?" in text and matched_dimensions else 0.0
@@ -154,11 +172,7 @@ def score_message(
     if score < minimum_score:
         return None
 
-    if dimension_scores:
-        strongest = max(dimension_scores, key=dimension_scores.get)
-    else:
-        strongest = "topic_interest"
-
+    strongest = max(dimension_scores, key=dimension_scores.get) if dimension_scores else "topic_interest"
     signal_type_map = {
         "transaction": "transaction_intent",
         "need_search": "need_intent",
@@ -170,10 +184,11 @@ def score_message(
     }
 
     independent_dimensions = len(dimension_scores)
-    confidence = 0.34
-    confidence += min(independent_dimensions, 4) * 0.11
+    confidence = 0.34 + min(independent_dimensions, 4) * 0.11
     if matched_topic_terms:
         confidence += min(len(matched_topic_terms), 3) * 0.07
+    if money_matches:
+        confidence += 0.05
     if "?" in text:
         confidence += 0.04
     if supply_matches:
@@ -190,6 +205,7 @@ def score_message(
             "dimension_scores": {key: round(value, 2) for key, value in dimension_scores.items()},
             "topic_terms": matched_topic_terms[:12],
             "topic_points": round(topic_points, 2),
+            "money_mentions": money_matches,
             "question_signal": question_points > 0,
             "supply_markers": sorted(set(supply_matches))[:8],
             "supply_penalty": round(supply_penalty, 2),
