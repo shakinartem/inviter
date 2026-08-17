@@ -17,6 +17,10 @@ import {
 
 const columnHelper = createColumnHelper<MessengerConnection>();
 
+function humanizeKey(value: string) {
+  return value.replace(/_/g, " ");
+}
+
 export default function ConnectionsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [label, setLabel] = useState("");
@@ -56,7 +60,7 @@ export default function ConnectionsPage() {
             <div>
               <p className="font-medium text-ink">{item.label}</p>
               <p className="text-xs capitalize text-muted">
-                {item.platform} · {item.auth_type.replaceAll("_", " ")}
+                {item.platform} · {humanizeKey(item.auth_type)}
               </p>
             </div>
           );
@@ -80,7 +84,7 @@ export default function ConnectionsPage() {
         cell: (info) => {
           const enabled = Object.entries(info.row.original.capabilities ?? {})
             .filter(([, value]) => value)
-            .map(([key]) => key.replaceAll("_", " "))
+            .map(([key]) => humanizeKey(key))
             .slice(0, 3);
           return (
             <div className="flex max-w-64 flex-wrap gap-1">
