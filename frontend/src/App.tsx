@@ -14,6 +14,7 @@ import LearningPage from "@/pages/learning";
 import OutcomeSourcesPage from "@/pages/outcome-sources";
 import YieldForecastPage from "@/pages/yield-forecast";
 import OpportunityPortfolioPage from "@/pages/opportunity-portfolio";
+import ExperimentsPage from "@/pages/experiments";
 import LoginPage from "@/pages/login";
 
 const queryClient = new QueryClient({
@@ -28,9 +29,7 @@ const queryClient = new QueryClient({
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem("access_token");
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
+  if (!token) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
 
@@ -40,14 +39,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/"
-            element={
-              <PrivateRoute>
-                <AppLayout />
-              </PrivateRoute>
-            }
-          >
+          <Route path="/" element={<PrivateRoute><AppLayout /></PrivateRoute>}>
             <Route index element={<DashboardPage />} />
             <Route path="connections" element={<ConnectionsPage />} />
             <Route path="accounts" element={<AccountsPage />} />
@@ -57,6 +49,7 @@ export default function App() {
             <Route path="segments" element={<SegmentsPage />} />
             <Route path="yield" element={<YieldForecastPage />} />
             <Route path="portfolio" element={<OpportunityPortfolioPage />} />
+            <Route path="experiments" element={<ExperimentsPage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
             <Route path="learning" element={<LearningPage />} />
             <Route path="outcome-sources" element={<OutcomeSourcesPage />} />

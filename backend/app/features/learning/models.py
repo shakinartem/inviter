@@ -11,12 +11,7 @@ from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class ActionFeatureSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Immutable model features as they were known when an action was attempted.
-
-    Scores can be recalculated later, but this record must not be rewritten. It is
-    the training/evaluation feature vector that preserves what the system knew at
-    decision time and prevents label leakage from future intelligence updates.
-    """
+    """Immutable model features as they were known when an action was attempted."""
 
     __tablename__ = "action_feature_snapshots"
 
@@ -63,16 +58,7 @@ class ActionFeatureSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class OutcomeEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Append-only observed result attributed to a person/campaign/action.
-
-    `stage` is intentionally explicit:
-    - transport: platform accepted/rejected the technical action;
-    - engagement: the person joined/replied/engaged;
-    - business: a verified downstream conversion/revenue outcome.
-
-    Keeping these labels separate prevents transport success from being mistaken
-    for buyer intent or business conversion during future model training.
-    """
+    """Append-only observed result attributed to an action or randomized unit."""
 
     __tablename__ = "outcome_events"
 
@@ -81,6 +67,9 @@ class OutcomeEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     action_job_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("action_jobs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    experiment_assignment_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("experiment_assignments.id", ondelete="SET NULL"), nullable=True, index=True
     )
     campaign_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("invite_campaigns.id", ondelete="CASCADE"), nullable=False, index=True
@@ -103,6 +92,7 @@ class OutcomeEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     properties: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     action_job = relationship("ActionJob")
+    experiment_assignment = relationship("ExperimentAssignment")
     campaign = relationship("InviteCampaign")
     audience_member = relationship("AudienceMember")
 
@@ -111,4 +101,5 @@ class OutcomeEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_outcome_events_stage_type", "stage", "event_type"),
         Index("ix_outcome_events_member_observed", "audience_member_id", "observed_at"),
         Index("ix_outcome_events_campaign_stage", "campaign_id", "stage"),
+        Index("ix_outcome_events_assignment_stage", "experiment_assignment_id", "stage"),
     )
