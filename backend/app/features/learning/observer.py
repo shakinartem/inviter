@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.accounts.credentials import credential_vault
@@ -14,7 +14,7 @@ from app.features.connections.service import ConnectorAccountContext
 from app.features.connectors.defaults import register_default_connectors
 from app.features.connectors.registry import connector_registry
 from app.features.intelligence.models import AudienceMember
-from app.features.learning.models import ActionFeatureSnapshot
+from app.features.learning.models import ActionFeatureSnapshot, OutcomeEvent
 from app.features.learning.observer_models import OutcomeObserverCursor
 from app.features.learning.service import OutcomeLearningService
 from app.features.orchestration.destinations import CampaignDestination
@@ -31,9 +31,9 @@ class AutomaticOutcomeObserver:
     """Observe voluntary post-action activity without re-reading full histories.
 
     One connector read is performed per campaign/destination, then messages are
-    matched locally to all eligible action jobs in that frozen campaign cohort.
-    We intentionally label only observed activity (`messaged_destination`), not
-    technical invite success and not causal conversion.
+    matched locally to eligible action jobs in that frozen campaign cohort. We
+    label only observed post-action activity (`messaged_destination`), never a
+    technical invite success and never causal business conversion.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -53,7 +53,7 @@ class AutomaticOutcomeObserver:
             select(
                 ActionFeatureSnapshot.owner_id,
                 ActionFeatureSnapshot.campaign_id,
-                func.min(ActionFeatureSnapshot.first_transport_at).label("first_transport_at"),
+                func.max(ActionFeatureSnapshot.first_transport_at).label("latest_transport_at"),
             )
             .where(
                 ActionFeatureSnapshot.first_transport_at.is_not(None),
@@ -63,7 +63,9 @@ class AutomaticOutcomeObserver:
                 ActionFeatureSnapshot.owner_id,
                 ActionFeatureSnapshot.campaign_id,
             )
-            .order_by(func.min(ActionFeatureSnapshot.first_transport_at).asc())
+            # Newer campaigns are observed first when several actions may compete
+            # for attribution of the same downstream behavior.
+            .order_by(func.max(ActionFeatureSnapshot.first_transport_at).desc())
             .limit(limit_campaigns)
         )
         campaigns = list(result.all())
@@ -76,7 +78,7 @@ class AutomaticOutcomeObserver:
             "messages_seen": 0,
             "outcomes_created": 0,
         }
-        for owner_id, campaign_id, _first_transport_at in campaigns:
+        for owner_id, campaign_id, _latest_transport_at in campaigns:
             try:
                 scan = await self.scan_campaign(
                     owner_id=owner_id,
@@ -85,7 +87,6 @@ class AutomaticOutcomeObserver:
                     message_limit=message_limit,
                 )
             except Exception:
-                # scan_campaign persists its own diagnostic state where possible.
                 totals["campaigns_failed"] += 1
                 continue
 
@@ -210,6 +211,13 @@ class AutomaticOutcomeObserver:
         now: datetime,
     ) -> list[dict[str, Any]]:
         cutoff = now - timedelta(days=lookback_days)
+        successful_transport = exists(
+            select(OutcomeEvent.id).where(
+                OutcomeEvent.action_job_id == ActionFeatureSnapshot.action_job_id,
+                OutcomeEvent.stage == "transport",
+                OutcomeEvent.success.is_(True),
+            )
+        )
         result = await self.session.execute(
             select(ActionFeatureSnapshot, ActionJob, AudienceMember)
             .join(ActionJob, ActionJob.id == ActionFeatureSnapshot.action_job_id)
@@ -221,6 +229,7 @@ class AutomaticOutcomeObserver:
                 ActionFeatureSnapshot.first_transport_at >= cutoff,
                 ActionJob.attempts > 0,
                 AudienceMember.is_bot.is_(False),
+                successful_transport,
             )
         )
         items: list[dict[str, Any]] = []
@@ -246,13 +255,13 @@ class AutomaticOutcomeObserver:
         by_external_user: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for item in eligible:
             by_external_user[str(item["external_user_id"])].append(item)
+        for actions in by_external_user.values():
+            actions.sort(key=lambda item: item["first_transport_at"], reverse=True)
 
         learning = OutcomeLearningService(self.session)
         outcomes_created = 0
         high_water: datetime | None = None
 
-        # Oldest first makes attribution deterministic when several messages are
-        # returned in reverse chronological order by a connector.
         normalized_messages: list[tuple[datetime, dict[str, Any]]] = []
         for message in messages:
             observed_at = self._normalize_datetime(message.get("created_at"))
@@ -269,6 +278,18 @@ class AutomaticOutcomeObserver:
             if not external_user_id or not external_message_id:
                 continue
 
+            source = f"{destination.platform}_observer"
+            scoped_external_event_id = f"{destination.external_id}:{external_message_id}"
+            dedupe_key = f"external:{source}:{scoped_external_event_id}"[:255]
+            existing_result = await self.session.execute(
+                select(OutcomeEvent.id).where(
+                    OutcomeEvent.owner_id == owner_id,
+                    OutcomeEvent.dedupe_key == dedupe_key,
+                )
+            )
+            if existing_result.scalar_one_or_none() is not None:
+                continue
+
             for action in by_external_user.get(str(external_user_id), []):
                 if action["job_id"] in seen_jobs:
                     continue
@@ -277,18 +298,16 @@ class AutomaticOutcomeObserver:
                     continue
 
                 latency_seconds = max((observed_at - first_transport_at).total_seconds(), 0.0)
-                event = await learning.record_observed_outcome(
+                await learning.record_observed_outcome(
                     owner_id=owner_id,
                     action_job_id=action["job_id"],
                     stage="engagement",
                     event_type="messaged_destination",
                     success=True,
-                    source=f"{destination.platform}_observer",
+                    source=source,
                     confidence=AUTOMATIC_ENGAGEMENT_CONFIDENCE,
                     observed_at=observed_at,
-                    external_event_id=(
-                        f"{destination.external_id}:{external_message_id}"
-                    ),
+                    external_event_id=scoped_external_event_id,
                     properties={
                         "destination_external_id": destination.external_id,
                         "external_message_id": str(external_message_id),
@@ -297,11 +316,8 @@ class AutomaticOutcomeObserver:
                         "attribution": "post_action_destination_activity",
                     },
                 )
-                if event is not None:
-                    outcomes_created += 1
+                outcomes_created += 1
                 seen_jobs.add(action["job_id"])
-                # One engagement label per job is enough for this event type. The
-                # raw messages remain in the source platform, not our database.
                 break
 
         return outcomes_created, high_water
