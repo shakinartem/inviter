@@ -18,7 +18,16 @@
 
 Нужны Docker Engine + Docker Compose plugin и открытые TCP 80/443 (для HTTP/HTTPS) и UDP 443 (HTTP/3, необязательно, но compose публикует его).
 
-В DNS создай A/AAAA запись домена на сервер, например `inviter.example.com`.
+В DNS создай A/AAAA запись домена на сервер, например `inviter.example.com`. До запуска Caddy домен уже должен резолвиться на публичный IP сервера, иначе автоматическая выдача TLS-сертификата не пройдёт.
+
+Для Redis на Linux рекомендуется включить memory overcommit:
+
+```bash
+sudo sysctl -w vm.overcommit_memory=1
+echo 'vm.overcommit_memory = 1' | sudo tee /etc/sysctl.d/99-qualive-inviter.conf
+```
+
+На небольшом VPS также проверь наличие swap, но не воспринимай swap как замену достаточной RAM.
 
 ## 2. Environment
 
@@ -39,7 +48,7 @@ cp .env.production.example .env.production
 openssl rand -hex 48
 ```
 
-`APP_SECRET` нельзя менять после начала использования encrypted connector credentials без заранее спланированной ротации.
+Production backend намеренно не стартует с дефолтными/слишком короткими секретами. `APP_SECRET` нельзя менять после начала использования encrypted connector credentials без заранее спланированной ротации.
 
 ## 3. Первый запуск
 
@@ -98,9 +107,11 @@ bash deploy/backup.sh
 - `SHA256SUMS`
 - `METADATA`
 
+PostgreSQL dump снимается online. Для Telegram `.session` backup **кратко останавливает backend/worker/beat**, потому что Telethon session — SQLite-файл и копировать его во время записи небезопасно. Скрипт использует `trap` и поднимает процессы обратно даже при ошибке архивации.
+
 Redis отдельно не сохраняется: он используется как cache/queue/rate-state, а не как основной source of truth.
 
-Копируй backup на отдельное хранилище. Backup, лежащий только на том же VPS, не считается резервной копией.
+Копируй backup на отдельное хранилище. Backup, лежащий только на том же VPS, не считается резервной копией. Для production имеет смысл дополнительно шифровать backup перед отправкой в object storage, потому что Telegram session-файлы являются чувствительными credentials.
 
 ## 7. Restore
 
@@ -109,7 +120,7 @@ bash deploy/restore.sh backups/20260818T010203Z
 bash deploy/smoke-test.sh
 ```
 
-Restore останавливает backend/workers, восстанавливает Postgres + Telegram sessions, применяет текущие migrations и запускает приложение снова.
+Restore останавливает backend/workers, восстанавливает Postgres + Telegram sessions, возвращает session-файлам ownership runtime-пользователя, применяет текущие migrations и запускает приложение снова.
 
 ## 8. Сеть
 
@@ -142,12 +153,17 @@ Postgres `5432`, Redis `6379`, backend `8000` и frontend `80` доступны 
 5. Admin login работает.
 6. Telegram account/session переживает `docker compose down` → `up -d`.
 7. Worker и Beat не перезапускаются циклически.
-8. `bash deploy/backup.sh` создаёт валидные checksums.
+8. `bash deploy/backup.sh` создаёт валидные checksums и после snapshot процессы снова подняты.
+9. `docker compose ... ps` показывает healthy backend/frontend/Postgres/Redis.
 
 ## 11. Firewall
 
 На сервере достаточно разрешить SSH с доверенных адресов и web traffic 80/443. Не открывай Postgres/Redis/8000/5173 наружу.
 
+Если сервер находится за дополнительным reverse proxy/CDN, отдельно настрой trusted proxy/IP policy; не публикуй backend напрямую ради обхода Caddy.
+
 ## 12. Secrets
 
 `.env.production` игнорируется Git и не должен попадать в архивы, тикеты или чаты. Для команды production secrets лучше вынести в отдельный password/secrets manager; Docker Compose env-файл — стартовый self-hosted вариант, не конечный enterprise secret-management слой.
+
+`telegram_sessions` volume также содержит секретный материал и должен рассматриваться как credentials store: ограничь доступ к Docker socket/root и не копируй volume в небезопасные места.
