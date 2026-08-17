@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_active_user
 from app.db.session import get_db_session
+from app.features.connections.orchestration import ConnectionAwareOrchestrationService
 from app.features.orchestration.schemas import (
     ActionJobListResponse,
     ActionJobResponse,
@@ -14,7 +15,6 @@ from app.features.orchestration.schemas import (
     CampaignPlanRequest,
     CampaignPlanResponse,
 )
-from app.features.orchestration.service import OrchestrationService
 
 
 router = APIRouter(prefix="/orchestration", tags=["orchestration"])
@@ -27,7 +27,7 @@ async def plan_campaign(
     user=Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> CampaignPlanResponse:
-    service = OrchestrationService(session)
+    service = ConnectionAwareOrchestrationService(session)
     try:
         result = await service.plan_campaign(
             owner_id=user.id,
@@ -49,7 +49,7 @@ async def start_campaign(
     user=Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> CampaignPlanResponse:
-    service = OrchestrationService(session)
+    service = ConnectionAwareOrchestrationService(session)
     try:
         result = await service.start_campaign(
             owner_id=user.id,
@@ -70,7 +70,7 @@ async def pause_campaign(
     user=Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    service = OrchestrationService(session)
+    service = ConnectionAwareOrchestrationService(session)
     if not await service.pause_campaign(owner_id=user.id, campaign_id=campaign_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
     return {"success": True, "status": "paused"}
@@ -82,7 +82,7 @@ async def stop_campaign(
     user=Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    service = OrchestrationService(session)
+    service = ConnectionAwareOrchestrationService(session)
     if not await service.stop_campaign(owner_id=user.id, campaign_id=campaign_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
     return {"success": True, "status": "completed"}
@@ -97,7 +97,7 @@ async def list_jobs(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=1000),
 ) -> ActionJobListResponse:
-    service = OrchestrationService(session)
+    service = ConnectionAwareOrchestrationService(session)
     items, total = await service.list_jobs(
         owner_id=user.id,
         campaign_id=campaign_id,
@@ -122,7 +122,7 @@ async def campaign_stats(
     user=Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> CampaignActionStatsResponse:
-    service = OrchestrationService(session)
+    service = ConnectionAwareOrchestrationService(session)
     try:
         result = await service.campaign_stats(owner_id=user.id, campaign_id=campaign_id)
     except ValueError as exc:
