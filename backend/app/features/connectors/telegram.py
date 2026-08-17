@@ -19,7 +19,7 @@ from telethon.errors import (
 from telethon.tl.functions.channels import InviteToChannelRequest
 from telethon.tl.functions.contacts import SearchRequest
 from telethon.tl.functions.messages import AddChatUserRequest
-from telethon.tl.types import Channel, Chat
+from telethon.tl.types import Channel, Chat, InputChannel, InputUser
 
 from app.features.accounts.client_manager import TelegramClientManager
 from app.features.connectors.base import ConnectorCapabilities, MessengerConnector
@@ -56,6 +56,33 @@ class TelegramConnector(MessengerConnector):
         finally:
             await self.client_manager.release_client(account.id)
 
+    @staticmethod
+    def _community_payload(chat: Channel | Chat) -> dict[str, Any]:
+        chat_type = "group"
+        if getattr(chat, "broadcast", False):
+            chat_type = "channel"
+        elif getattr(chat, "megagroup", False):
+            chat_type = "supergroup"
+
+        return {
+            "platform": "telegram",
+            "external_id": str(chat.id),
+            "username": getattr(chat, "username", None),
+            "title": getattr(chat, "title", None),
+            "type": chat_type,
+            "participants_count": getattr(chat, "participants_count", None),
+            "access_hash": (
+                str(getattr(chat, "access_hash"))
+                if getattr(chat, "access_hash", None) is not None
+                else None
+            ),
+            "raw": {
+                "verified": bool(getattr(chat, "verified", False)),
+                "scam": bool(getattr(chat, "scam", False)),
+                "fake": bool(getattr(chat, "fake", False)),
+            },
+        }
+
     async def discover_communities(
         self,
         query: str,
@@ -69,40 +96,33 @@ class TelegramConnector(MessengerConnector):
 
         client = await self.client_manager.get_client(account)
         try:
-            result = await client(SearchRequest(q=query, limit=min(max(limit, 1), 200)))
             communities: list[dict[str, Any]] = []
+            normalized_query = query.strip()
+
+            if not normalized_query:
+                # An empty query is intentionally treated as "sync my chats".
+                # This exposes groups already accessible to the authorized account,
+                # including private destinations, without asking users for raw IDs.
+                async for dialog in client.iter_dialogs(limit=min(max(limit, 1), 500)):
+                    chat = getattr(dialog, "entity", None)
+                    if not isinstance(chat, (Channel, Chat)):
+                        continue
+                    payload = self._community_payload(chat)
+                    if filters and filters.get("chat_type") and filters["chat_type"] != payload["type"]:
+                        continue
+                    communities.append(payload)
+                    if len(communities) >= limit:
+                        break
+                return communities
+
+            result = await client(SearchRequest(q=normalized_query, limit=min(max(limit, 1), 200)))
             for chat in result.chats:
                 if not isinstance(chat, (Channel, Chat)):
                     continue
-                chat_type = "group"
-                if getattr(chat, "broadcast", False):
-                    chat_type = "channel"
-                elif getattr(chat, "megagroup", False):
-                    chat_type = "supergroup"
-
-                if filters and filters.get("chat_type") and filters["chat_type"] != chat_type:
+                payload = self._community_payload(chat)
+                if filters and filters.get("chat_type") and filters["chat_type"] != payload["type"]:
                     continue
-
-                communities.append(
-                    {
-                        "platform": self.platform,
-                        "external_id": str(chat.id),
-                        "username": getattr(chat, "username", None),
-                        "title": getattr(chat, "title", None),
-                        "type": chat_type,
-                        "participants_count": getattr(chat, "participants_count", None),
-                        "access_hash": (
-                            str(getattr(chat, "access_hash"))
-                            if getattr(chat, "access_hash", None) is not None
-                            else None
-                        ),
-                        "raw": {
-                            "verified": bool(getattr(chat, "verified", False)),
-                            "scam": bool(getattr(chat, "scam", False)),
-                            "fake": bool(getattr(chat, "fake", False)),
-                        },
-                    }
-                )
+                communities.append(payload)
             return communities
         finally:
             await self.client_manager.release_client(account.id)
@@ -120,6 +140,7 @@ class TelegramConnector(MessengerConnector):
             async for user in client.iter_participants(community, limit=limit):
                 status = getattr(user, "status", None)
                 was_online = getattr(status, "was_online", None)
+                access_hash = getattr(user, "access_hash", None)
                 members.append(
                     {
                         "platform": self.platform,
@@ -132,6 +153,9 @@ class TelegramConnector(MessengerConnector):
                         "is_scam": bool(getattr(user, "scam", False)),
                         "is_fake": bool(getattr(user, "fake", False)),
                         "last_seen": was_online,
+                        "platform_data": {
+                            "access_hash": str(access_hash) if access_hash is not None else None,
+                        },
                     }
                 )
             return members
@@ -178,6 +202,45 @@ class TelegramConnector(MessengerConnector):
         finally:
             await self.client_manager.release_client(account.id)
 
+    @staticmethod
+    def _target_ref(value: str | int) -> str | int | InputUser:
+        if isinstance(value, int):
+            return value
+        ref = str(value).strip()
+        if ref.startswith("user:"):
+            parts = ref.split(":", 2)
+            if len(parts) != 3:
+                raise ValueError("Malformed Telegram user reference")
+            return InputUser(user_id=int(parts[1]), access_hash=int(parts[2]))
+        if ref.startswith("@"):
+            return ref
+        try:
+            return int(ref)
+        except ValueError:
+            return ref
+
+    @staticmethod
+    def _destination_ref(value: str | int) -> tuple[str, str | int | InputChannel]:
+        if isinstance(value, int):
+            return "auto", value
+        ref = str(value).strip()
+        if ref.startswith("channel:"):
+            parts = ref.split(":", 2)
+            if len(parts) != 3:
+                raise ValueError("Malformed Telegram channel reference")
+            return "channel", InputChannel(channel_id=int(parts[1]), access_hash=int(parts[2]))
+        if ref.startswith("chat:"):
+            parts = ref.split(":", 1)
+            if len(parts) != 2:
+                raise ValueError("Malformed Telegram chat reference")
+            return "chat", int(parts[1])
+        if ref.startswith("@"):
+            return "auto", ref
+        try:
+            return "auto", int(ref)
+        except ValueError:
+            return "auto", ref
+
     async def execute_action(
         self,
         action: str,
@@ -196,34 +259,55 @@ class TelegramConnector(MessengerConnector):
         client = await self.client_manager.get_client(account)
         try:
             try:
-                target_ref: str | int = target.get("username") or int(target["external_user_id"])
-                destination_ref: str | int = destination.get("username") or int(destination["external_id"])
-                target_entity = await client.get_entity(target_ref)
-                destination_entity = await client.get_entity(destination_ref)
+                target_ref = self._target_ref(target.get("username") or target["external_user_id"])
+                if isinstance(target_ref, InputUser):
+                    target_entity = target_ref
+                else:
+                    target_entity = await client.get_entity(target_ref)
 
-                if isinstance(destination_entity, Channel):
+                destination_value = destination.get("username") or destination["external_id"]
+                destination_kind, destination_ref = self._destination_ref(destination_value)
+
+                if destination_kind == "channel":
                     await client(
                         InviteToChannelRequest(
-                            channel=destination_entity,
+                            channel=destination_ref,
                             users=[target_entity],
                         )
                     )
-                elif isinstance(destination_entity, Chat):
+                elif destination_kind == "chat":
                     await client(
                         AddChatUserRequest(
-                            chat_id=destination_entity.id,
+                            chat_id=int(destination_ref),
                             user_id=target_entity,
                             fwd_limit=0,
                         )
                     )
                 else:
-                    return {
-                        "ok": False,
-                        "action": action,
-                        "code": "UNSUPPORTED_DESTINATION",
-                        "retryable": False,
-                        "message": "Destination is not a Telegram group/channel",
-                    }
+                    destination_entity = await client.get_entity(destination_ref)
+                    if isinstance(destination_entity, Channel):
+                        await client(
+                            InviteToChannelRequest(
+                                channel=destination_entity,
+                                users=[target_entity],
+                            )
+                        )
+                    elif isinstance(destination_entity, Chat):
+                        await client(
+                            AddChatUserRequest(
+                                chat_id=destination_entity.id,
+                                user_id=target_entity,
+                                fwd_limit=0,
+                            )
+                        )
+                    else:
+                        return {
+                            "ok": False,
+                            "action": action,
+                            "code": "UNSUPPORTED_DESTINATION",
+                            "retryable": False,
+                            "message": "Destination is not a Telegram group/channel",
+                        }
 
                 return {"ok": True, "action": action, "code": "INVITED"}
             except UserAlreadyParticipantError:
