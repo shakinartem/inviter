@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.features.accounts.models import Account
+from app.features.experiments.service import CampaignExperimentService
 from app.features.intelligence.models import AudienceMember
 from app.features.inviter.models import InviteCampaign
 from app.features.learning.frozen_snapshot import FrozenDecisionSnapshotService
@@ -17,7 +18,7 @@ from app.features.segments.models import CampaignAudienceMember, CampaignAudienc
 
 
 class ConnectionAwareOrchestrationService(OrchestrationService):
-    """Bind actions to compatible connections, frozen cohorts, stable refs and labels."""
+    """Bind actions to compatible connections, frozen cohorts, experiments and stable refs."""
 
     async def plan_campaign(
         self,
@@ -42,14 +43,52 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
                 f"direct_invite is not enabled for destination platform: {destination.platform}"
             )
 
-        result = await super().plan_campaign(
+        experiment_service = CampaignExperimentService(self.session)
+        experiment = await experiment_service.get_for_campaign(
             owner_id=owner_id,
             campaign_id=campaign_id,
-            limit=limit,
-            min_activity_score=min_activity_score,
-            min_readiness_score=min_readiness_score,
-            account_ids=account_ids,
         )
+        treatment_ids: set[UUID] | None = None
+        planner_limit = limit
+
+        if experiment is not None:
+            # Build/restore assignment before the base planner creates ActionJobs.
+            # Candidate ranking comes from the frozen Opportunity cohort. Holdout
+            # units never enter the planner and therefore never get an ActionJob.
+            campaign = await self._get_campaign(owner_id, campaign_id)
+            if campaign is None:
+                raise ValueError("Campaign not found")
+            planner_limit = experiment_service.required_pool_size(
+                action_budget=limit,
+                holdout_percentage=experiment.holdout_percentage,
+            )
+            ranked_pool = await self._get_candidates(
+                owner_id=owner_id,
+                campaign=campaign,
+                platform="telegram",
+                min_activity_score=min_activity_score,
+                min_readiness_score=min_readiness_score,
+                limit=planner_limit,
+            )
+            experiment, treatment_ids = await experiment_service.assign_ranked_pool(
+                owner_id=owner_id,
+                campaign_id=campaign_id,
+                ranked_member_ids=[member.id for member in ranked_pool],
+                action_budget=limit,
+            )
+
+        self._active_experiment_treatment_ids = treatment_ids
+        try:
+            result = await super().plan_campaign(
+                owner_id=owner_id,
+                campaign_id=campaign_id,
+                limit=planner_limit,
+                min_activity_score=min_activity_score,
+                min_readiness_score=min_readiness_score,
+                account_ids=account_ids,
+            )
+        finally:
+            self._active_experiment_treatment_ids = None
 
         jobs_result = await self.session.execute(
             select(ActionJob).where(
@@ -76,9 +115,6 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
                 job.target_external_user_id = self._telegram_member_ref(member)
                 job.destination_external_id = destination.connector_ref
 
-            # Capture immutable features from CampaignAudienceMember while the
-            # campaign decision is still reproducible. execute_job then reuses
-            # this snapshot instead of reading a profile that may have changed.
             await FrozenDecisionSnapshotService(self.session).ensure_for_jobs(
                 owner_id=owner_id,
                 campaign_id=campaign_id,
@@ -86,6 +122,17 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
             )
             await self.session.commit()
 
+        if experiment is not None:
+            result.update(
+                {
+                    "experiment_id": experiment.id,
+                    "experiment_status": experiment.status,
+                    "treatment_count": experiment.treatment_count,
+                    "holdout_count": experiment.holdout_count,
+                    "candidate_pool_size": experiment.candidate_pool_size,
+                    "action_budget": experiment.action_budget,
+                }
+            )
         return result
 
     async def execute_job(self, job_id: UUID) -> dict[str, Any]:
@@ -180,9 +227,15 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
                 limit=limit,
             )
 
-        if platform != "telegram":
-            return candidates
-        return [candidate for candidate in candidates if self._is_resolvable_telegram_member(candidate)]
+        if platform == "telegram":
+            candidates = [
+                candidate for candidate in candidates if self._is_resolvable_telegram_member(candidate)
+            ]
+
+        treatment_ids = getattr(self, "_active_experiment_treatment_ids", None)
+        if treatment_ids is not None:
+            candidates = [candidate for candidate in candidates if candidate.id in treatment_ids]
+        return candidates
 
     @staticmethod
     def _is_resolvable_telegram_member(member: AudienceMember) -> bool:
