@@ -96,7 +96,7 @@ export default function ParserPage() {
       }),
       columnHelper.accessor("source", {
         header: "Source",
-        cell: (info) => <span className="capitalize">{info.getValue().replaceAll("_", " ")}</span>,
+        cell: (info) => <span className="capitalize">{info.getValue().replace(/_/g, " ")}</span>,
       }),
       columnHelper.accessor("created_at", {
         header: "Found",
