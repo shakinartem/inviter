@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.features.accounts.models import Account
 from app.features.intelligence.models import AudienceMember
 from app.features.inviter.models import InviteCampaign
+from app.features.learning.frozen_snapshot import FrozenDecisionSnapshotService
 from app.features.learning.service import OutcomeLearningService
 from app.features.orchestration.destinations import CampaignDestinationService
 from app.features.orchestration.models import ActionJob
@@ -75,6 +76,14 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
                 job.target_external_user_id = self._telegram_member_ref(member)
                 job.destination_external_id = destination.connector_ref
 
+            # Capture immutable features from CampaignAudienceMember while the
+            # campaign decision is still reproducible. execute_job then reuses
+            # this snapshot instead of reading a profile that may have changed.
+            await FrozenDecisionSnapshotService(self.session).ensure_for_jobs(
+                owner_id=owner_id,
+                campaign_id=campaign_id,
+                jobs=jobs,
+            )
             await self.session.commit()
 
         return result
@@ -138,8 +147,6 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
         source = source_result.scalar_one_or_none()
 
         if source is not None:
-            # Use scores frozen with the campaign cohort, not mutable profile
-            # scores. This keeps planning reproducible even after later enrichment.
             stmt = (
                 select(AudienceMember)
                 .join(
@@ -164,7 +171,6 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
             result = await self.session.execute(stmt)
             candidates = list(result.scalars().all())
         else:
-            # Legacy campaigns created before Opportunity Segments continue to work.
             candidates = await super()._get_candidates(
                 owner_id=owner_id,
                 campaign=campaign,
