@@ -1,0 +1,47 @@
+from __future__ import annotations
+
+from typing import Literal
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.security import get_current_active_user
+from app.db.session import get_db_session
+from app.features.inviter.schemas import InviteCampaignResponse, InviteSettings
+from app.features.orchestration.destinations import CampaignDestinationService
+
+
+router = APIRouter(prefix="/orchestration/campaigns", tags=["orchestration"])
+
+
+class CampaignCreateFromCommunityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(..., min_length=1, max_length=160)
+    target_community_id: UUID
+    source_type: Literal["parsed_list"] = "parsed_list"
+    notes: str | None = Field(default=None, max_length=2000)
+    settings: InviteSettings = Field(default_factory=InviteSettings)
+
+
+@router.post("", response_model=InviteCampaignResponse, status_code=status.HTTP_201_CREATED)
+async def create_campaign_from_community(
+    payload: CampaignCreateFromCommunityRequest,
+    user=Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> InviteCampaignResponse:
+    service = CampaignDestinationService(session)
+    try:
+        campaign, _destination = await service.create_campaign_from_community(
+            owner_id=user.id,
+            title=payload.title,
+            target_community_id=payload.target_community_id,
+            source_type=payload.source_type,
+            settings=payload.settings.model_dump(),
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return InviteCampaignResponse.model_validate(campaign)
