@@ -16,11 +16,7 @@ from app.features.parser.models import ParsedChat
 
 
 class PlatformDiscoveryService:
-    """Discover communities through any installed connector and persist them.
-
-    Existing parser routes remain for legacy catalog sources. This service is the
-    connector-native path for Telegram/Discord and future messenger adapters.
-    """
+    """Discover communities through any installed connector and persist them."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -60,17 +56,25 @@ class PlatformDiscoveryService:
 
         saved: list[ParsedChat] = []
         now = datetime.now(timezone.utc)
+        normalized_query = query.strip()
+        source = "telegram_dialogs" if platform == "telegram" and not normalized_query else f"{platform}_connector"
+
         for community in communities:
             external_id = str(community.get("external_id") or "").strip()
             if not external_id:
                 continue
             chat_id = self._numeric_chat_id(platform, external_id)
+            username = community.get("username")
+            access_hash = community.get("access_hash")
+            community_type = community.get("type") or "community"
+
             metadata = dict(community.get("raw") or {})
             metadata.update(
                 {
                     "platform": platform,
                     "external_id": external_id,
-                    "discovery_query": query,
+                    "discovery_query": normalized_query,
+                    "discovery_mode": "dialogs" if source == "telegram_dialogs" else "search",
                     "active_participants": community.get("active_participants"),
                 }
             )
@@ -86,22 +90,22 @@ class PlatformDiscoveryService:
                 chat = ParsedChat(
                     owner_id=owner_id,
                     chat_id=chat_id,
-                    username=community.get("username"),
+                    username=username,
                     title=community.get("title"),
                     description=community.get("description"),
-                    access_hash=community.get("access_hash"),
-                    chat_type=community.get("type") or "community",
+                    access_hash=access_hash,
+                    chat_type=community_type,
                     participants_count=community.get("participants_count"),
                     active_participants=community.get("active_participants"),
                     category=None,
-                    niche=query,
+                    niche=normalized_query or None,
                     tags=None,
                     language=None,
                     country=None,
-                    is_public=True,
+                    is_public=bool(username),
                     is_active=True,
                     is_restricted=False,
-                    source=f"{platform}_connector",
+                    source=source,
                     last_parsed_at=now,
                     parse_count=1,
                     avg_posts_per_day=None,
@@ -112,11 +116,19 @@ class PlatformDiscoveryService:
                 self.session.add(chat)
             else:
                 chat.title = community.get("title") or chat.title
-                chat.username = community.get("username") or chat.username
-                chat.participants_count = community.get("participants_count") or chat.participants_count
-                chat.active_participants = community.get("active_participants") or chat.active_participants
-                chat.niche = query
-                chat.source = f"{platform}_connector"
+                chat.username = username or chat.username
+                chat.access_hash = access_hash or chat.access_hash
+                chat.chat_type = community_type or chat.chat_type
+                participants = community.get("participants_count")
+                if participants is not None:
+                    chat.participants_count = participants
+                active_participants = community.get("active_participants")
+                if active_participants is not None:
+                    chat.active_participants = active_participants
+                if normalized_query:
+                    chat.niche = normalized_query
+                chat.is_public = bool(chat.username)
+                chat.source = source
                 chat.last_parsed_at = now
                 chat.parse_count = (chat.parse_count or 0) + 1
                 chat.extra_data = {**(chat.extra_data or {}), **metadata}
@@ -152,12 +164,8 @@ class PlatformDiscoveryService:
             value = int(external_id)
         except ValueError as exc:
             raise ValueError(
-                f"Connector {platform} returned a non-numeric community id; "
-                "canonical string community ids are not migrated yet"
+                f"Connector {platform} returned a non-numeric community id; canonical string community ids are not migrated yet"
             ) from exc
-        # Telegram legacy IDs use a negative namespace. Other numeric platforms
-        # retain their native ID so existing IntelligenceService can pass it back
-        # into the connector without another lookup layer.
         if platform == "telegram":
             return -abs(value)
         return value
