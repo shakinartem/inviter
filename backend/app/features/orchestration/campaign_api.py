@@ -35,7 +35,11 @@ async def create_campaign_from_community(
     destination_service = CampaignDestinationService(session)
     segment_service = SegmentService(session)
     try:
-        campaign, _destination = await destination_service.create_campaign_from_community(
+        segment = await segment_service.get(user.id, payload.source_segment_id)
+        if segment is None:
+            raise ValueError("Audience segment not found")
+
+        campaign, destination = await destination_service.create_campaign_from_community(
             owner_id=user.id,
             title=payload.title,
             target_community_id=payload.target_community_id,
@@ -44,6 +48,15 @@ async def create_campaign_from_community(
             notes=payload.notes,
             commit=False,
         )
+        if segment.platform != destination.platform:
+            raise ValueError(
+                f"Opportunity platform ({segment.platform}) must match destination platform ({destination.platform})"
+            )
+        if destination.platform != "telegram":
+            raise ValueError(
+                "Current direct-invite campaign action is Telegram-only; use a Telegram Opportunity and destination"
+            )
+
         await segment_service.freeze_for_campaign(
             owner_id=user.id,
             segment_id=payload.source_segment_id,
