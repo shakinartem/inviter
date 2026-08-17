@@ -1,21 +1,81 @@
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 
 from app.features.accounts.models import Account
+from app.features.intelligence.models import AudienceMember
+from app.features.inviter.models import InviteCampaign
+from app.features.orchestration.destinations import CampaignDestinationService
+from app.features.orchestration.models import ActionJob
 from app.features.orchestration.service import OrchestrationService
 
 
 class ConnectionAwareOrchestrationService(OrchestrationService):
-    """Constrain legacy direct-invite campaigns to compatible accounts.
+    """Bind actions to compatible connections and reproducible connector refs."""
 
-    The current InviteCampaign destination model is still Telegram-specific, so
-    the allocator must not select Discord (or future) connections just because
-    they are healthy and active. When Campaign becomes platform-neutral this
-    override can become a generic `platform` argument in the base allocator.
-    """
+    async def plan_campaign(
+        self,
+        *,
+        owner_id: UUID,
+        campaign_id: UUID,
+        limit: int = 1_000,
+        min_activity_score: float = 0.0,
+        min_readiness_score: float = 0.0,
+        account_ids: list[UUID] | None = None,
+    ) -> dict[str, Any]:
+        destination = await CampaignDestinationService(self.session).get_for_campaign(
+            owner_id=owner_id,
+            campaign_id=campaign_id,
+        )
+        if destination is None:
+            raise ValueError(
+                "Campaign has no canonical destination. Sync the destination community and recreate the campaign."
+            )
+        if destination.platform != "telegram":
+            raise ValueError(
+                f"direct_invite is not enabled for destination platform: {destination.platform}"
+            )
+
+        result = await super().plan_campaign(
+            owner_id=owner_id,
+            campaign_id=campaign_id,
+            limit=limit,
+            min_activity_score=min_activity_score,
+            min_readiness_score=min_readiness_score,
+            account_ids=account_ids,
+        )
+
+        jobs_result = await self.session.execute(
+            select(ActionJob).where(
+                ActionJob.campaign_id == campaign_id,
+                ActionJob.action == "direct_invite",
+                ActionJob.status.in_(["planned", "retry_wait"]),
+            )
+        )
+        jobs = list(jobs_result.scalars().all())
+        if jobs:
+            member_ids = {job.audience_member_id for job in jobs}
+            members_result = await self.session.execute(
+                select(AudienceMember).where(AudienceMember.id.in_(member_ids))
+            )
+            members = {member.id: member for member in members_result.scalars().all()}
+
+            for job in jobs:
+                member = members.get(job.audience_member_id)
+                if member is None or not self._is_resolvable_telegram_member(member):
+                    job.status = "cancelled"
+                    job.result_code = "UNRESOLVABLE_TARGET"
+                    job.result_message = "Telegram target has neither username nor access_hash"
+                    continue
+                job.target_external_user_id = self._telegram_member_ref(member)
+                job.destination_external_id = destination.connector_ref
+
+            await self.session.commit()
+
+        return result
 
     async def _get_accounts(
         self,
@@ -37,3 +97,41 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
             )
         )
         return list(result.scalars().all())
+
+    async def _get_candidates(
+        self,
+        *,
+        owner_id: UUID,
+        campaign: InviteCampaign,
+        platform: str,
+        min_activity_score: float,
+        min_readiness_score: float,
+        limit: int,
+    ) -> list[AudienceMember]:
+        candidates = await super()._get_candidates(
+            owner_id=owner_id,
+            campaign=campaign,
+            platform=platform,
+            min_activity_score=min_activity_score,
+            min_readiness_score=min_readiness_score,
+            limit=limit,
+        )
+        if platform != "telegram":
+            return candidates
+        return [candidate for candidate in candidates if self._is_resolvable_telegram_member(candidate)]
+
+    @staticmethod
+    def _is_resolvable_telegram_member(member: AudienceMember) -> bool:
+        if member.username:
+            return True
+        platform_data = member.platform_data or {}
+        return bool(platform_data.get("access_hash"))
+
+    @staticmethod
+    def _telegram_member_ref(member: AudienceMember) -> str:
+        if member.username:
+            return member.username if member.username.startswith("@") else f"@{member.username}"
+        access_hash = (member.platform_data or {}).get("access_hash")
+        if not access_hash:
+            raise ValueError("Telegram audience member is not resolvable")
+        return f"user:{member.external_user_id}:{access_hash}"
