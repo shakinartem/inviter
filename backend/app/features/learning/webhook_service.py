@@ -13,6 +13,8 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.accounts.credentials import credential_vault
+from app.features.experiments.models import ExperimentAssignment
+from app.features.learning.experiment_outcomes import ExperimentOutcomeService
 from app.features.learning.models import ActionFeatureSnapshot, OutcomeEvent
 from app.features.learning.service import OutcomeLearningService
 from app.features.learning.webhook_models import OutcomeWebhookSource
@@ -198,30 +200,9 @@ class OutcomeWebhookService:
             )
             existing = existing_result.scalar_one_or_none()
             if existing is not None:
+                await self._attach_assignment_if_available(existing)
                 await self._mark_accepted(source.id, now)
                 return existing, True
-
-            # A downstream label may only be attached to an action that actually
-            # reached transport. This prevents a CRM event from manufacturing a
-            # conversion label for a merely planned/unexecuted job and preserves
-            # the decision-time feature vector instead of creating one after the fact.
-            attribution_result = await self.session.execute(
-                select(ActionFeatureSnapshot, ActionJob)
-                .join(ActionJob, ActionJob.id == ActionFeatureSnapshot.action_job_id)
-                .where(
-                    ActionFeatureSnapshot.owner_id == source.owner_id,
-                    ActionFeatureSnapshot.action_job_id == payload.action_job_id,
-                )
-            )
-            attribution = attribution_result.one_or_none()
-            if attribution is None:
-                raise WebhookPayloadError("Action has no decision-time snapshot")
-            snapshot, job = attribution
-            if job.attempts <= 0 or snapshot.first_transport_at is None:
-                raise WebhookPayloadError("Action has not reached transport")
-            first_transport_at = self._aware(snapshot.first_transport_at)
-            if observed_at < first_transport_at:
-                raise WebhookPayloadError("observed_at predates the attributed action")
 
             body_sha256 = hashlib.sha256(raw_body).hexdigest()
             properties = dict(payload.properties or {})
@@ -232,25 +213,98 @@ class OutcomeWebhookService:
                     "payload_sha256": body_sha256,
                 }
             )
-            event = await OutcomeLearningService(self.session).record_observed_outcome(
-                owner_id=source.owner_id,
-                action_job_id=payload.action_job_id,
-                stage=payload.stage,
-                event_type=payload.event_type,
-                success=payload.success,
-                source="webhook",
-                confidence=payload.confidence,
-                value=payload.value,
-                observed_at=observed_at,
-                external_event_id=payload.event_id,
-                idempotency_key=idempotency_key,
-                properties=properties,
-            )
+
+            if payload.experiment_assignment_id is not None:
+                event = await ExperimentOutcomeService(self.session).record_assignment_outcome(
+                    owner_id=source.owner_id,
+                    experiment_assignment_id=payload.experiment_assignment_id,
+                    stage=payload.stage,
+                    event_type=payload.event_type,
+                    success=payload.success,
+                    source="webhook",
+                    confidence=payload.confidence,
+                    value=payload.value,
+                    observed_at=observed_at,
+                    external_event_id=payload.event_id,
+                    idempotency_key=idempotency_key,
+                    properties=properties,
+                )
+            else:
+                event = await self._record_action_outcome(
+                    source=source,
+                    payload=payload,
+                    observed_at=observed_at,
+                    idempotency_key=idempotency_key,
+                    properties=properties,
+                )
+
             await self._mark_accepted(source.id, now)
             return event, False
         except Exception as exc:
             await self._mark_rejected(source.id, now, str(exc)[:1000])
             raise
+
+    async def _record_action_outcome(
+        self,
+        *,
+        source: OutcomeWebhookSource,
+        payload: WebhookOutcomePayload,
+        observed_at: datetime,
+        idempotency_key: str,
+        properties: dict,
+    ) -> OutcomeEvent:
+        if payload.action_job_id is None:
+            raise WebhookPayloadError("action_job_id is required for action attribution")
+        attribution_result = await self.session.execute(
+            select(ActionFeatureSnapshot, ActionJob)
+            .join(ActionJob, ActionJob.id == ActionFeatureSnapshot.action_job_id)
+            .where(
+                ActionFeatureSnapshot.owner_id == source.owner_id,
+                ActionFeatureSnapshot.action_job_id == payload.action_job_id,
+            )
+        )
+        attribution = attribution_result.one_or_none()
+        if attribution is None:
+            raise WebhookPayloadError("Action has no decision-time snapshot")
+        snapshot, job = attribution
+        if job.attempts <= 0 or snapshot.first_transport_at is None:
+            raise WebhookPayloadError("Action has not reached transport")
+        first_transport_at = self._aware(snapshot.first_transport_at)
+        if observed_at < first_transport_at:
+            raise WebhookPayloadError("observed_at predates the attributed action")
+
+        event = await OutcomeLearningService(self.session).record_observed_outcome(
+            owner_id=source.owner_id,
+            action_job_id=payload.action_job_id,
+            stage=payload.stage,
+            event_type=payload.event_type,
+            success=payload.success,
+            source="webhook",
+            confidence=payload.confidence,
+            value=payload.value,
+            observed_at=observed_at,
+            external_event_id=payload.event_id,
+            idempotency_key=idempotency_key,
+            properties=properties,
+        )
+        await self._attach_assignment_if_available(event)
+        return event
+
+    async def _attach_assignment_if_available(self, event: OutcomeEvent) -> None:
+        if event.experiment_assignment_id is not None:
+            return
+        result = await self.session.execute(
+            select(ExperimentAssignment.id).where(
+                ExperimentAssignment.owner_id == event.owner_id,
+                ExperimentAssignment.campaign_id == event.campaign_id,
+                ExperimentAssignment.audience_member_id == event.audience_member_id,
+            )
+        )
+        assignment_id = result.scalar_one_or_none()
+        if assignment_id is None:
+            return
+        event.experiment_assignment_id = assignment_id
+        await self.session.commit()
 
     async def _public_source(self, source_id: UUID) -> OutcomeWebhookSource | None:
         result = await self.session.execute(select(OutcomeWebhookSource).where(OutcomeWebhookSource.id == source_id))
