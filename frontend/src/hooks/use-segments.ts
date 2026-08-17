@@ -63,6 +63,30 @@ export type SegmentCreatePayload = {
   criteria: SegmentCriteria;
 };
 
+export type SegmentPreview = {
+  platform: string;
+  matched_count: number;
+  max_members: number;
+  average_activity_score: number | null;
+  average_relevance_score: number | null;
+  average_intent_score: number | null;
+  average_readiness_score: number | null;
+  strongest_signal_distribution: Record<string, number>;
+  community_count: number;
+  warnings: string[];
+  sample: Array<{
+    audience_member_id: string;
+    username: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    activity_score: number | null;
+    relevance_score: number | null;
+    intent_score: number | null;
+    readiness_score: number | null;
+    strongest_signal_type: string | null;
+  }>;
+};
+
 export function useSegments(params?: { active_only?: boolean; platform?: string }) {
   return useQuery({
     queryKey: ["segments", params],
@@ -83,6 +107,15 @@ export function useSegmentMembers(segmentId: string | null, limit = 100) {
       return data;
     },
     enabled: !!segmentId,
+  });
+}
+
+export function usePreviewSegment() {
+  return useMutation({
+    mutationFn: async (payload: { platform: string; criteria: SegmentCriteria }) => {
+      const { data } = await apiClient.post<SegmentPreview>("/segments/preview", payload);
+      return data;
+    },
   });
 }
 

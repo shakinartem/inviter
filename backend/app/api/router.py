@@ -16,6 +16,7 @@ from app.features.orchestration.campaign_api import router as campaign_create_ro
 from app.features.parser.api import router as parser_router
 from app.features.proxies.api import router as proxies_router
 from app.features.inviter.api import router as inviter_router
+from app.features.segments.preview_api import router as segment_preview_router
 from app.features.segments.api import router as segments_router
 
 api_router = APIRouter()
@@ -41,6 +42,7 @@ api_router.include_router(connectors_router, tags=["connectors"])
 api_router.include_router(discovery_router, tags=["discovery"])
 api_router.include_router(intelligence_router, tags=["intelligence"])
 api_router.include_router(intent_router, tags=["intent"])
+api_router.include_router(segment_preview_router, tags=["segments"])
 api_router.include_router(segments_router, tags=["segments"])
 api_router.include_router(learning_router, tags=["learning"])
 api_router.include_router(outcome_webhook_router, tags=["learning", "outcome-webhooks"])
