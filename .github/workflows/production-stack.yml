@@ -1,0 +1,155 @@
+name: Production stack validation
+
+on:
+  push:
+    branches:
+      - "agent/**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  production-compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare production test env
+        run: cp .env.production.example .env.production
+
+      - name: Verify and audit production frontend dependencies
+        working-directory: frontend
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          git diff --exit-code -- package-lock.json
+          npm audit --omit=dev --audit-level=high
+
+      - name: Validate shell scripts
+        run: bash -n deploy/backup.sh deploy/restore.sh deploy/smoke-test.sh
+
+      - name: Validate Compose configuration
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml config -q
+
+      - name: Validate Caddy configuration
+        run: docker run --rm -e APP_DOMAIN=inviter.example.com -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+
+      - name: Build production images
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml build backend frontend
+
+      - name: Start production core without public TLS edge
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml up -d postgres redis migrate backend frontend
+
+      - name: Verify migration service succeeded
+        run: |
+          migrate_id="$(docker compose --env-file .env.production -f docker-compose.prod.yml ps -aq migrate)"
+          test -n "$migrate_id"
+          test "$(docker inspect -f '{{.State.Status}}' "$migrate_id")" = "exited"
+          test "$(docker inspect -f '{{.State.ExitCode}}' "$migrate_id")" = "0"
+
+      - name: Wait for backend readiness
+        run: |
+          backend_id="$(docker compose --env-file .env.production -f docker-compose.prod.yml ps -q backend)"
+          test -n "$backend_id"
+          for attempt in $(seq 1 45); do
+            running="$(docker inspect -f '{{.State.Running}}' "$backend_id")"
+            if [[ "$running" != "true" ]]; then
+              docker logs "$backend_id" || true
+              echo "Backend container stopped before becoming healthy" >&2
+              exit 1
+            fi
+            health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$backend_id")"
+            echo "backend health attempt $attempt: $health"
+            if [[ "$health" == "healthy" ]]; then
+              exit 0
+            fi
+            if [[ "$health" == "unhealthy" ]]; then
+              docker logs "$backend_id" || true
+              exit 1
+            fi
+            sleep 2
+          done
+          docker logs "$backend_id" || true
+          echo "Backend did not become healthy in time" >&2
+          exit 1
+
+      - name: Verify backend health
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read().decode())"
+
+      - name: Verify production registration and docs are closed
+        run: |
+          docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend python - <<'PY'
+          import urllib.error
+          import urllib.request
+          for url in (
+              'http://127.0.0.1:8000/docs',
+              'http://127.0.0.1:8000/api/v1/auth/register',
+          ):
+              req = urllib.request.Request(url, method='GET')
+              try:
+                  urllib.request.urlopen(req, timeout=5)
+              except urllib.error.HTTPError as exc:
+                  assert exc.code == 404, (url, exc.code)
+              else:
+                  raise AssertionError(f'{url} unexpectedly reachable')
+          PY
+
+      - name: Bootstrap admin and verify login
+        run: |
+          docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend \
+            python -m app.cli.create_admin --email ci-admin@example.com --password 'ci-admin-password-12345'
+          docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend python - <<'PY'
+          import json
+          import urllib.parse
+          import urllib.request
+          body = urllib.parse.urlencode({
+              'username': 'ci-admin@example.com',
+              'password': 'ci-admin-password-12345',
+          }).encode()
+          req = urllib.request.Request(
+              'http://127.0.0.1:8000/api/v1/auth/jwt/login',
+              data=body,
+              headers={'Content-Type': 'application/x-www-form-urlencoded'},
+              method='POST',
+          )
+          payload = json.loads(urllib.request.urlopen(req, timeout=5).read())
+          assert payload.get('access_token')
+          PY
+
+      - name: Verify Telegram session volume and backup snapshot
+        run: |
+          docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend sh -c "printf session-persistence-ok > /data/sessions/ci-sentinel"
+          bash deploy/backup.sh
+          latest="$(ls -1dt backups/* | head -n 1)"
+          test -f "$latest/postgres.dump"
+          test -f "$latest/SHA256SUMS"
+          tar tzf "$latest/telegram-sessions.tar.gz" | grep -q 'ci-sentinel'
+          docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend test -f /data/sessions/ci-sentinel
+
+      - name: Verify static frontend health
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml exec -T frontend wget -q -O - http://127.0.0.1/healthz
+
+      - name: Verify Postgres and Redis are not published
+        run: |
+          test -z "$(docker compose --env-file .env.production -f docker-compose.prod.yml port postgres 5432 2>/dev/null || true)"
+          test -z "$(docker compose --env-file .env.production -f docker-compose.prod.yml port redis 6379 2>/dev/null || true)"
+
+      - name: Package validated source from tracked files only
+        run: git archive --format=zip --prefix=qualive-inviter/ -o qualive-inviter-production-ready.zip HEAD
+
+      - name: Upload validated source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualive-inviter-production-ready
+          path: qualive-inviter-production-ready.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml logs --no-color
+
+      - name: Cleanup
+        if: always()
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml down -v --remove-orphans

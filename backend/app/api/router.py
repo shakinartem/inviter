@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.health import router as health_router
+from app.core.config import settings
 from app.core.security import auth_backend, fastapi_users
 from app.features.accounts.api import router as accounts_router
 from app.features.allocations.api import router as allocations_router
@@ -38,11 +39,12 @@ api_router.include_router(
     prefix="/auth/jwt",
     tags=["auth"],
 )
-api_router.include_router(
-    fastapi_users.get_register_router(UserRead, UserCreate),
-    prefix="/auth",
-    tags=["auth"],
-)
+if settings.allow_registration:
+    api_router.include_router(
+        fastapi_users.get_register_router(UserRead, UserCreate),
+        prefix="/auth",
+        tags=["auth"],
+    )
 api_router.include_router(
     fastapi_users.get_users_router(UserRead, UserUpdate),
     prefix="/users",
