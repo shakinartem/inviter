@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_active_user
@@ -77,7 +78,7 @@ async def capacity_history(
 ) -> AccountCapacityHistoryResponse:
     account = (
         await session.execute(
-            __import__("sqlalchemy").select(Account).where(
+            select(Account).where(
                 Account.id == account_id,
                 Account.owner_id == user.id,
             )
