@@ -51,6 +51,36 @@ export type CommunityEnrichResult = {
   captured_at: string;
 };
 
+export type IntentScanResult = {
+  community_id: string;
+  platform: string;
+  messages_scanned: number;
+  candidate_signals: number;
+  signals_created: number;
+  members_scored: number;
+  strongest_signal: number;
+  average_member_intent: number;
+  signal_types: Record<string, number>;
+  model_version: string;
+  scanned_at: string;
+};
+
+export type IntentSignal = {
+  id: string;
+  audience_member_id: string;
+  parsed_chat_id: string;
+  platform: string;
+  external_message_id: string | null;
+  observed_at: string;
+  signal_type: string;
+  topic: string | null;
+  score: number;
+  confidence: number;
+  model_version: string;
+  features: Record<string, unknown> | null;
+  created_at: string;
+};
+
 export function useAudience(params?: {
   platform?: string;
   min_activity_score?: number;
@@ -89,5 +119,52 @@ export function useEnrichCommunity() {
       qc.invalidateQueries({ queryKey: ["parsed-chats"] });
       qc.invalidateQueries({ queryKey: ["parser-stats"] });
     },
+  });
+}
+
+export function useIntentScan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      communityId,
+      lookbackDays = 30,
+      messageLimit = 10_000,
+      minimumScore = 12,
+    }: {
+      communityId: string;
+      lookbackDays?: number;
+      messageLimit?: number;
+      minimumScore?: number;
+    }) => {
+      const { data } = await apiClient.post<IntentScanResult>(
+        `/intelligence/intent/communities/${communityId}/scan`,
+        {
+          lookback_days: lookbackDays,
+          message_limit: messageLimit,
+          minimum_score: minimumScore,
+        },
+      );
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["audience"] });
+      qc.invalidateQueries({ queryKey: ["intent-signals"] });
+    },
+  });
+}
+
+export function useIntentSignals(params?: {
+  audience_member_id?: string;
+  community_id?: string;
+  min_score?: number;
+  limit?: number;
+}) {
+  return useQuery({
+    queryKey: ["intent-signals", params],
+    queryFn: async () => {
+      const { data } = await apiClient.get<IntentSignal[]>("/intelligence/intent/signals", { params });
+      return data;
+    },
+    enabled: Boolean(params?.audience_member_id || params?.community_id),
   });
 }
