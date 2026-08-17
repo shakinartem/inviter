@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Any
 
 
@@ -25,6 +26,7 @@ class MessengerConnector(ABC):
     """Stable platform boundary used by discovery, audience and campaigns.
 
     Platform-specific SDK objects must not leak outside connector implementations.
+    Connector methods return plain dictionaries with stable platform-neutral keys.
     """
 
     platform: str
@@ -62,6 +64,21 @@ class MessengerConnector(ABC):
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
         raise NotImplementedError
+
+    async def get_recent_messages(
+        self,
+        community: Any,
+        *,
+        account: Any,
+        since: datetime,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return normalized recent messages.
+
+        Connectors that advertise ``read_messages`` should override this method.
+        The default keeps the contract backwards compatible for future connectors.
+        """
+        raise NotImplementedError(f"{self.platform} does not implement message reading")
 
     @abstractmethod
     async def execute_action(
