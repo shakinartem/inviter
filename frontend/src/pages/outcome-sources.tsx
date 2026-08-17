@@ -94,7 +94,8 @@ export default function OutcomeSourcesPage() {
               <div className="mt-3 rounded-lg bg-white/70 p-3 text-xs text-muted">
                 Sign exactly <code>timestamp + "." + raw_body</code> with HMAC-SHA256. Send headers
                 <code> X-Qualive-Timestamp</code> and <code> X-Qualive-Signature: sha256=&lt;hex&gt;</code>.
-                Every payload needs a stable <code>event_id</code> and <code>action_job_id</code>.
+                Every payload needs a stable <code>event_id</code> and exactly one attribution key:
+                <code> action_job_id</code> for an executed action or <code> experiment_assignment_id</code> for a randomized treatment/holdout unit.
               </div>
               <Button className="mt-3" size="sm" variant="outline" onClick={() => setRevealed(null)}>I saved the secret</Button>
             </div>
