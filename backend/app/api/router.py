@@ -9,6 +9,7 @@ from app.features.connectors.api import router as connectors_router
 from app.features.discovery.api import router as discovery_router
 from app.features.intelligence.api import router as intelligence_router
 from app.features.intelligence.intent_api import router as intent_router
+from app.features.learning.api import router as learning_router
 from app.features.orchestration.api import router as orchestration_router
 from app.features.orchestration.campaign_api import router as campaign_create_router
 from app.features.parser.api import router as parser_router
@@ -38,6 +39,7 @@ api_router.include_router(connectors_router, tags=["connectors"])
 api_router.include_router(discovery_router, tags=["discovery"])
 api_router.include_router(intelligence_router, tags=["intelligence"])
 api_router.include_router(intent_router, tags=["intent"])
+api_router.include_router(learning_router, tags=["learning"])
 api_router.include_router(campaign_create_router, tags=["orchestration"])
 api_router.include_router(orchestration_router, tags=["orchestration"])
 api_router.include_router(proxies_router, tags=["proxies"])
