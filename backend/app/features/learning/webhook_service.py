@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import re
 import secrets
 import time
@@ -10,11 +9,11 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from pydantic import ValidationError
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.accounts.credentials import credential_vault
-from app.features.learning.models import OutcomeEvent
+from app.features.learning.models import ActionFeatureSnapshot, OutcomeEvent
 from app.features.learning.service import OutcomeLearningService
 from app.features.learning.webhook_models import OutcomeWebhookSource
 from app.features.learning.webhook_schemas import (
@@ -22,6 +21,7 @@ from app.features.learning.webhook_schemas import (
     WebhookSourceCreate,
     WebhookSourceUpdate,
 )
+from app.features.orchestration.models import ActionJob
 
 
 MAX_BODY_BYTES = 64 * 1024
@@ -116,7 +116,6 @@ class OutcomeWebhookService:
         source = await self.get_source(owner_id, source_id)
         if source is None:
             raise WebhookSourceNotFound("Webhook source not found")
-
         updates = payload.model_dump(exclude_unset=True)
         if "name" in updates:
             source.name = str(updates["name"]).strip()
@@ -126,7 +125,6 @@ class OutcomeWebhookService:
             source.allowed_stages = list(dict.fromkeys(updates["allowed_stages"]))
         if "allowed_event_types" in updates and updates["allowed_event_types"] is not None:
             source.allowed_event_types = updates["allowed_event_types"]
-
         await self.session.commit()
         await self.session.refresh(source)
         return source
@@ -177,16 +175,14 @@ class OutcomeWebhookService:
 
             try:
                 payload = WebhookOutcomePayload.model_validate_json(raw_body)
-            except (ValidationError, json.JSONDecodeError) as exc:
+            except ValidationError as exc:
                 raise WebhookPayloadError("Invalid webhook outcome payload") from exc
 
             if payload.stage not in (source.allowed_stages or []):
                 raise WebhookPolicyError(f"Stage is not allowed for this source: {payload.stage}")
             allowed_types = source.allowed_event_types or []
             if allowed_types and payload.event_type not in allowed_types:
-                raise WebhookPolicyError(
-                    f"Event type is not allowed for this source: {payload.event_type}"
-                )
+                raise WebhookPolicyError(f"Event type is not allowed for this source: {payload.event_type}")
 
             observed_at = self._aware(payload.observed_at)
             if observed_at > now + FUTURE_EVENT_TOLERANCE:
@@ -204,6 +200,28 @@ class OutcomeWebhookService:
             if existing is not None:
                 await self._mark_accepted(source.id, now)
                 return existing, True
+
+            # A downstream label may only be attached to an action that actually
+            # reached transport. This prevents a CRM event from manufacturing a
+            # conversion label for a merely planned/unexecuted job and preserves
+            # the decision-time feature vector instead of creating one after the fact.
+            attribution_result = await self.session.execute(
+                select(ActionFeatureSnapshot, ActionJob)
+                .join(ActionJob, ActionJob.id == ActionFeatureSnapshot.action_job_id)
+                .where(
+                    ActionFeatureSnapshot.owner_id == source.owner_id,
+                    ActionFeatureSnapshot.action_job_id == payload.action_job_id,
+                )
+            )
+            attribution = attribution_result.one_or_none()
+            if attribution is None:
+                raise WebhookPayloadError("Action has no decision-time snapshot")
+            snapshot, job = attribution
+            if job.attempts <= 0 or snapshot.first_transport_at is None:
+                raise WebhookPayloadError("Action has not reached transport")
+            first_transport_at = self._aware(snapshot.first_transport_at)
+            if observed_at < first_transport_at:
+                raise WebhookPayloadError("observed_at predates the attributed action")
 
             body_sha256 = hashlib.sha256(raw_body).hexdigest()
             properties = dict(payload.properties or {})
@@ -235,9 +253,7 @@ class OutcomeWebhookService:
             raise
 
     async def _public_source(self, source_id: UUID) -> OutcomeWebhookSource | None:
-        result = await self.session.execute(
-            select(OutcomeWebhookSource).where(OutcomeWebhookSource.id == source_id)
-        )
+        result = await self.session.execute(select(OutcomeWebhookSource).where(OutcomeWebhookSource.id == source_id))
         return result.scalar_one_or_none()
 
     @staticmethod
@@ -263,8 +279,7 @@ class OutcomeWebhookService:
         signature_header: str,
     ) -> bool:
         expected = cls.signature_for(signing_secret, timestamp, raw_body)
-        supplied = signature_header.strip().lower()
-        return hmac.compare_digest(expected, supplied)
+        return hmac.compare_digest(expected, signature_header.strip().lower())
 
     @staticmethod
     def _parse_and_validate_timestamp(value: str) -> int:
@@ -316,9 +331,7 @@ class OutcomeWebhookService:
     @staticmethod
     def _normalize_slug(value: str) -> str:
         slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
-        if not slug:
-            slug = f"source-{secrets.token_hex(4)}"
-        return slug[:64]
+        return (slug or f"source-{secrets.token_hex(4)}")[:64]
 
     @staticmethod
     def _aware(value: datetime) -> datetime:
