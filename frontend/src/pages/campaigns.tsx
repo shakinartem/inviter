@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { createColumnHelper } from "@tanstack/react-table";
-import { Pause, Play, Plus, RefreshCw, Search, Square, Trash2 } from "lucide-react";
+import { Pause, Play, Plus, RefreshCw, Search, Square, Target, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import {
   useStopCampaign,
 } from "@/hooks/use-campaigns";
 import { useParsedChats, usePlatformDiscovery } from "@/hooks/use-parser";
+import { useSegments } from "@/hooks/use-segments";
 import type { InviteCampaignListItem } from "@/types";
 
 const columnHelper = createColumnHelper<InviteCampaignListItem>();
@@ -22,11 +24,10 @@ const columnHelper = createColumnHelper<InviteCampaignListItem>();
 export default function CampaignsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState("");
-  const [minActivity, setMinActivity] = useState("30");
-  const [minReadiness, setMinReadiness] = useState("20");
   const [planLimit, setPlanLimit] = useState("1000");
 
   const { data: campaigns, isLoading } = useCampaigns({ skip: 0, limit: 500 });
+  const { data: segments, isLoading: segmentsLoading } = useSegments({ active_only: true, platform: "telegram" });
   const { data: syncedChats, isLoading: chatsLoading } = useParsedChats({
     source: "telegram_dialogs",
     limit: 500,
@@ -40,6 +41,7 @@ export default function CampaignsPage() {
 
   const [form, setForm] = useState({
     title: "",
+    source_segment_id: "",
     target_community_id: "",
   });
 
@@ -49,6 +51,13 @@ export default function CampaignsPage() {
         ["group", "supergroup", "chat"].includes(chat.chat_type ?? ""),
       ),
     [syncedChats],
+  );
+  const availableSegments = useMemo(
+    () =>
+      (segments ?? []).filter(
+        (segment) => segment.is_active && !!segment.last_refreshed_at && segment.matched_count > 0,
+      ),
+    [segments],
   );
 
   const handleSyncChats = async () => {
@@ -66,18 +75,18 @@ export default function CampaignsPage() {
   };
 
   const handleCreate = async () => {
-    if (!form.title.trim() || !form.target_community_id) return;
+    if (!form.title.trim() || !form.source_segment_id || !form.target_community_id) return;
     try {
       await createCampaign.mutateAsync({
         title: form.title.trim(),
+        source_segment_id: form.source_segment_id,
         target_community_id: form.target_community_id,
-        source_type: "parsed_list",
       });
-      setForm({ title: "", target_community_id: "" });
+      setForm({ title: "", source_segment_id: "", target_community_id: "" });
       setShowCreate(false);
-      toast.success("Campaign created");
+      toast.success("Campaign created with a frozen Opportunity cohort");
     } catch {
-      toast.error("Failed to create campaign. Resync the destination chat if it is private.");
+      toast.error("Failed to create campaign. Refresh the Opportunity and resync a private destination if needed.");
     }
   };
 
@@ -87,13 +96,13 @@ export default function CampaignsPage() {
         id: campaign.id,
         payload: {
           limit: Number(planLimit) || 1000,
-          min_activity_score: Number(minActivity) || 0,
-          min_readiness_score: Number(minReadiness) || 0,
+          min_activity_score: 0,
+          min_readiness_score: 0,
         },
       });
-      toast.success(`Campaign started · ${result.planned ?? 0} actions planned`);
+      toast.success(`Campaign started · ${result.planned ?? 0} actions planned from frozen cohort`);
     } catch {
-      toast.error("Could not start campaign. Check destination, audience and active Telegram accounts.");
+      toast.error("Could not start campaign. Check the frozen Opportunity, destination and active Telegram accounts.");
     }
   };
 
@@ -140,8 +149,12 @@ export default function CampaignsPage() {
       }),
       columnHelper.display({
         id: "audience",
-        header: "Audience",
-        cell: () => "Ranked audience",
+        header: "Opportunity",
+        cell: () => (
+          <span className="inline-flex items-center gap-1 text-xs text-muted">
+            <Target className="h-3.5 w-3.5" /> Frozen cohort
+          </span>
+        ),
       }),
       columnHelper.accessor("created_at", {
         header: "Created",
@@ -192,38 +205,16 @@ export default function CampaignsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-ink">Campaigns</h1>
-          <p className="mt-1 text-sm text-muted">Turn ranked audience into scheduled platform actions.</p>
+          <p className="mt-1 text-sm text-muted">Apply a frozen Opportunity cohort to a concrete destination and action.</p>
         </div>
         <Button size="sm" onClick={() => setShowCreate(!showCreate)}>
           <Plus className="mr-1 h-4 w-4" /> New Campaign
         </Button>
       </div>
 
-      <div className="grid gap-3 rounded-xl border border-black/5 bg-white p-4 shadow-sm md:grid-cols-3">
-        <label className="space-y-1 text-xs font-medium text-muted">
-          Min activity
-          <input
-            className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-            type="number"
-            min={0}
-            max={100}
-            value={minActivity}
-            onChange={(event) => setMinActivity(event.target.value)}
-          />
-        </label>
-        <label className="space-y-1 text-xs font-medium text-muted">
-          Min readiness
-          <input
-            className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-            type="number"
-            min={0}
-            max={100}
-            value={minReadiness}
-            onChange={(event) => setMinReadiness(event.target.value)}
-          />
-        </label>
-        <label className="space-y-1 text-xs font-medium text-muted">
-          Max audience
+      <div className="rounded-xl border border-black/5 bg-white p-4 shadow-sm">
+        <label className="block max-w-xs space-y-1 text-xs font-medium text-muted">
+          Max actions to schedule
           <input
             className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
             type="number"
@@ -233,6 +224,9 @@ export default function CampaignsPage() {
             onChange={(event) => setPlanLimit(event.target.value)}
           />
         </label>
+        <p className="mt-2 text-xs text-muted">
+          Activity/intent/readiness thresholds belong to the Opportunity definition. Campaign execution does not silently re-score or expand its frozen cohort.
+        </p>
       </div>
 
       {showCreate && (
@@ -241,7 +235,7 @@ export default function CampaignsPage() {
             <div>
               <h3 className="text-sm font-semibold text-ink">New Campaign</h3>
               <p className="mt-1 text-xs text-muted">
-                Choose a Telegram group already accessible to one of your connected accounts. Raw chat IDs are not required.
+                Opportunity + Destination → Action. The selected Opportunity is copied into an immutable campaign cohort at creation time.
               </p>
             </div>
             <Button variant="outline" size="sm" onClick={handleSyncChats} disabled={syncChats.isPending}>
@@ -249,13 +243,26 @@ export default function CampaignsPage() {
               {syncChats.isPending ? "Syncing..." : "Sync my Telegram chats"}
             </Button>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-3">
             <input
               className="rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-accent"
               placeholder="Campaign title *"
               value={form.title}
               onChange={(event) => setForm({ ...form, title: event.target.value })}
             />
+            <select
+              className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-accent"
+              value={form.source_segment_id}
+              onChange={(event) => setForm({ ...form, source_segment_id: event.target.value })}
+              disabled={segmentsLoading}
+            >
+              <option value="">Select Opportunity *</option>
+              {availableSegments.map((segment) => (
+                <option key={segment.id} value={segment.id}>
+                  {segment.name} · {segment.matched_count.toLocaleString()} people
+                </option>
+              ))}
+            </select>
             <select
               className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-accent"
               value={form.target_community_id}
@@ -271,6 +278,11 @@ export default function CampaignsPage() {
               ))}
             </select>
           </div>
+          {!segmentsLoading && availableSegments.length === 0 && (
+            <p className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-muted">
+              No materialized Telegram Opportunity yet. <Link to="/segments" className="font-medium text-ink underline">Create and refresh an Opportunity Segment</Link> first.
+            </p>
+          )}
           {!chatsLoading && destinations.length === 0 && (
             <p className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-muted">
               No synced Telegram groups yet. Click “Sync my Telegram chats” after connecting an active Telegram account.
@@ -281,9 +293,9 @@ export default function CampaignsPage() {
             <Button
               size="sm"
               onClick={handleCreate}
-              disabled={!form.title.trim() || !form.target_community_id || createCampaign.isPending}
+              disabled={!form.title.trim() || !form.source_segment_id || !form.target_community_id || createCampaign.isPending}
             >
-              {createCampaign.isPending ? "Creating..." : "Create"}
+              {createCampaign.isPending ? "Freezing cohort…" : "Create Campaign"}
             </Button>
           </div>
         </div>

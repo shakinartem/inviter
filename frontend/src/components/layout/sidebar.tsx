@@ -11,12 +11,14 @@ import {
   Brain,
   BrainCircuit,
   Cable,
+  Target,
 } from "lucide-react";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Overview" },
   { to: "/parser", icon: Search, label: "Discovery" },
   { to: "/audience", icon: Brain, label: "Audience" },
+  { to: "/segments", icon: Target, label: "Opportunities" },
   { to: "/campaigns", icon: Send, label: "Campaigns" },
   { to: "/learning", icon: BrainCircuit, label: "Learning" },
   { to: "/connections", icon: Cable, label: "Connections" },

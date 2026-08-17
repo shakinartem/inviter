@@ -75,6 +75,7 @@ class CampaignDestinationService:
         source_chat_id: int | None = None,
         settings: dict | None = None,
         notes: str | None = None,
+        commit: bool = True,
     ) -> tuple[InviteCampaign, CampaignDestination]:
         chat_result = await self.session.execute(
             select(ParsedChat).where(
@@ -155,9 +156,12 @@ class CampaignDestinationService:
             access_hash=chat.access_hash,
         )
         self.session.add(destination)
-        await self.session.commit()
-        await self.session.refresh(campaign)
-        await self.session.refresh(destination)
+        await self.session.flush()
+
+        if commit:
+            await self.session.commit()
+            await self.session.refresh(campaign)
+            await self.session.refresh(destination)
         return campaign, destination
 
     async def get_for_campaign(

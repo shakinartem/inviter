@@ -8,6 +8,7 @@ import ConnectionsPage from "@/pages/connections";
 import ProxiesPage from "@/pages/proxies";
 import ParserPage from "@/pages/parser";
 import AudiencePage from "@/pages/audience";
+import SegmentsPage from "@/pages/segments";
 import CampaignsPage from "@/pages/campaigns";
 import LearningPage from "@/pages/learning";
 import LoginPage from "@/pages/login";
@@ -50,6 +51,7 @@ export default function App() {
             <Route path="proxies" element={<ProxiesPage />} />
             <Route path="parser" element={<ParserPage />} />
             <Route path="audience" element={<AudiencePage />} />
+            <Route path="segments" element={<SegmentsPage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
             <Route path="learning" element={<LearningPage />} />
           </Route>

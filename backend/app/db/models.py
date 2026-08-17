@@ -8,6 +8,12 @@ from app.features.intelligence.models import AudienceMember, CommunityMembership
 from app.features.learning.models import ActionFeatureSnapshot, OutcomeEvent
 from app.features.orchestration.destinations import CampaignDestination
 from app.features.orchestration.models import ActionJob
+from app.features.segments.models import (
+    AudienceSegment,
+    AudienceSegmentMember,
+    CampaignAudienceMember,
+    CampaignAudienceSource,
+)
 
 __all__ = (
     "User",
@@ -26,4 +32,8 @@ __all__ = (
     "OutcomeEvent",
     "CampaignDestination",
     "ActionJob",
+    "AudienceSegment",
+    "AudienceSegmentMember",
+    "CampaignAudienceSource",
+    "CampaignAudienceMember",
 )

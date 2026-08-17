@@ -20,7 +20,7 @@ export type CampaignPlanPayload = {
 export type CanonicalCampaignCreatePayload = {
   title: string;
   target_community_id: string;
-  source_type?: "parsed_list";
+  source_segment_id: string;
   notes?: string | null;
   settings?: InviteSettingsPayload;
 };
