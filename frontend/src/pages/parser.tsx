@@ -5,7 +5,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import type { ParsedChatListItem } from "@/types";
 import { createColumnHelper } from "@tanstack/react-table";
-import { Search, Trash2, RefreshCw, Globe } from "lucide-react";
+import { Search, Globe } from "lucide-react";
 
 const columnHelper = createColumnHelper<ParsedChatListItem>();
 
@@ -51,19 +51,22 @@ const columns = [
   }),
 ];
 
+type ParserSource = "telegram" | "tgstat" | "telemetr";
+
 export default function ParserPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [search, setSearch] = useState("");
+  const [source, setSource] = useState<ParserSource>("telegram");
   const { data, isLoading } = useParsedChats({ search, limit: 500 });
   const { data: stats } = useParserStats();
   const parseSearch = useParseSearch();
-  const deleteChat = useDeleteParsedChat();
+  useDeleteParsedChat();
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     await parseSearch.mutateAsync({
-      query: searchQuery,
-      source: "telegram",
+      query: searchQuery.trim(),
+      source,
       limit: 100,
     });
   };
@@ -74,28 +77,31 @@ export default function ParserPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-ink">Parser</h1>
+          <h1 className="text-2xl font-semibold text-ink">Discovery</h1>
           <p className="text-sm text-muted mt-1">
-            {stats ? `${stats.total_chats} chats · ${stats.total_parses} parses` : "Search and discover Telegram chats"}
+            {stats ? `${stats.total_chats} communities · ${stats.total_parses} discovery runs` : "Search and discover communities"}
           </p>
         </div>
       </div>
 
-      {/* Search Form */}
       <div className="rounded-xl border border-black/5 bg-white p-5 shadow-sm space-y-4">
         <h3 className="text-sm font-semibold text-ink flex items-center gap-2">
-          <Globe className="h-4 w-4" /> Search Telegram Chats
+          <Globe className="h-4 w-4" /> Discover communities
         </h3>
         <div className="flex gap-3">
           <input
             className="flex-1 rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-accent"
-            placeholder="Enter niche or keywords (e.g., crypto, ai, trading)..."
+            placeholder="Enter niche or keywords (e.g. real estate Moscow, AI, trading)..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
           />
           <div className="flex gap-2">
-            <select className="rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-accent bg-white">
+            <select
+              value={source}
+              onChange={(e) => setSource(e.target.value as ParserSource)}
+              className="rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-accent bg-white"
+            >
               <option value="telegram">Telegram Search</option>
               <option value="tgstat">TGStat</option>
               <option value="telemetr">Telemetr</option>
@@ -107,7 +113,6 @@ export default function ParserPage() {
         </div>
       </div>
 
-      {/* Filter */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
         <input
