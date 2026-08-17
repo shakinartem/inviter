@@ -9,6 +9,7 @@ from app.features.connectors.api import router as connectors_router
 from app.features.discovery.api import router as discovery_router
 from app.features.experiments.api import router as experiments_router
 from app.features.experiments.analysis_api import router as experiment_analysis_router
+from app.features.experiments.power_api import router as experiment_power_router
 from app.features.intelligence.api import router as intelligence_router
 from app.features.intelligence.intent_api import router as intent_router
 from app.features.learning.api import router as learning_router
@@ -44,6 +45,7 @@ api_router.include_router(accounts_router, tags=["accounts"])
 api_router.include_router(connections_router, tags=["connections"])
 api_router.include_router(connectors_router, tags=["connectors"])
 api_router.include_router(discovery_router, tags=["discovery"])
+api_router.include_router(experiment_power_router, tags=["experiments", "power-planning"])
 api_router.include_router(experiment_analysis_router, tags=["experiments", "causal-analysis"])
 api_router.include_router(experiments_router, tags=["experiments"])
 api_router.include_router(intelligence_router, tags=["intelligence"])
