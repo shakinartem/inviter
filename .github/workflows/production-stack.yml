@@ -1,0 +1,45 @@
+name: Production stack validation
+
+on:
+  push:
+    branches:
+      - "agent/**"
+  pull_request:
+
+jobs:
+  production-compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare production test env
+        run: cp .env.production.example .env.production
+
+      - name: Validate Compose configuration
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml config -q
+
+      - name: Build production images
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml build backend frontend
+
+      - name: Start production core without public TLS edge
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml up -d postgres redis migrate backend frontend
+
+      - name: Verify migration service succeeded
+        run: |
+          test "$(docker compose --env-file .env.production -f docker-compose.prod.yml ps -a migrate --format '{{.State}}')" = "exited"
+          test "$(docker inspect -f '{{.State.ExitCode}}' qualive_inviter-migrate-1)" = "0"
+
+      - name: Verify backend health
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read().decode())"
+
+      - name: Verify static frontend health
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml exec -T frontend wget -q -O - http://127.0.0.1/healthz
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml logs --no-color
+
+      - name: Cleanup
+        if: always()
+        run: docker compose --env-file .env.production -f docker-compose.prod.yml down -v --remove-orphans
