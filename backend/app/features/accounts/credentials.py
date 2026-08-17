@@ -20,15 +20,30 @@ class CredentialVault:
     """
 
     VERSION = "v1"
+    INSECURE_DEFAULTS = {"", "change-me", "changeme", "secret"}
 
     def __init__(self, secret: str | None = None) -> None:
-        source = (secret or settings.secret).encode("utf-8")
+        self._source_secret = secret or settings.secret
+        source = self._source_secret.encode("utf-8")
         digest = hashlib.sha256(source).digest()
         self._fernet = Fernet(base64.urlsafe_b64encode(digest))
+
+    @property
+    def is_securely_configured(self) -> bool:
+        normalized = self._source_secret.strip().lower()
+        return normalized not in self.INSECURE_DEFAULTS and len(self._source_secret) >= 24
+
+    def require_secure_configuration(self) -> None:
+        if not self.is_securely_configured:
+            raise ValueError(
+                "APP_SECRET must be changed to a strong value (at least 24 characters) "
+                "before storing messenger credentials"
+            )
 
     def encrypt(self, payload: dict[str, Any] | None) -> str | None:
         if not payload:
             return None
+        self.require_secure_configuration()
         raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         token = self._fernet.encrypt(raw).decode("ascii")
         return f"{self.VERSION}:{token}"
