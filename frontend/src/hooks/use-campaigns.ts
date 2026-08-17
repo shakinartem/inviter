@@ -17,10 +17,27 @@ export type CampaignPlanPayload = {
   account_ids?: string[] | null;
 };
 
+export type CampaignPlanResult = {
+  campaign_id: string;
+  planned: number;
+  candidates: number;
+  accounts: number;
+  first_scheduled_at: string | null;
+  last_scheduled_at: string | null;
+  status?: string | null;
+  experiment_id?: string | null;
+  experiment_status?: string | null;
+  action_budget?: number | null;
+  candidate_pool_size?: number | null;
+  treatment_count?: number | null;
+  holdout_count?: number | null;
+};
+
 export type CanonicalCampaignCreatePayload = {
   title: string;
   target_community_id: string;
   source_segment_id: string;
+  holdout_percentage?: number;
   notes?: string | null;
   settings?: InviteSettingsPayload;
 };
@@ -77,7 +94,10 @@ export function useCreateCampaign() {
       const { data } = await apiClient.post<InviteCampaignResponse>("/orchestration/campaigns", payload);
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["campaigns"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["campaigns"] });
+      qc.invalidateQueries({ queryKey: ["experiments"] });
+    },
   });
 }
 
@@ -85,13 +105,14 @@ export function useStartCampaign() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, payload }: { id: string; payload?: CampaignPlanPayload }) => {
-      const { data } = await apiClient.post(`/orchestration/campaigns/${id}/start`, payload ?? {});
+      const { data } = await apiClient.post<CampaignPlanResult>(`/orchestration/campaigns/${id}/start`, payload ?? {});
       return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["campaigns"] });
       qc.invalidateQueries({ queryKey: ["campaign"] });
       qc.invalidateQueries({ queryKey: ["campaign-action-stats"] });
+      qc.invalidateQueries({ queryKey: ["experiments"] });
     },
   });
 }
@@ -132,6 +153,9 @@ export function useDeleteCampaign() {
     mutationFn: async (id: string) => {
       await apiClient.delete(`/campaigns/${id}`);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["campaigns"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["campaigns"] });
+      qc.invalidateQueries({ queryKey: ["experiments"] });
+    },
   });
 }
