@@ -7,7 +7,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   production-compose:
@@ -19,32 +19,12 @@ jobs:
       - name: Prepare production test env
         run: cp .env.production.example .env.production
 
-      - name: Refresh and audit production frontend dependencies
+      - name: Verify and audit production frontend dependencies
         working-directory: frontend
         run: |
           npm install --package-lock-only --ignore-scripts
+          git diff --exit-code -- package-lock.json
           npm audit --omit=dev --audit-level=high
-
-      - name: Persist audited lockfile on branch pushes
-        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
-        run: |
-          if git diff --quiet -- frontend/package-lock.json; then
-            echo "Frontend lockfile already current"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add frontend/package-lock.json
-          git commit -m "Refresh audited frontend lockfile"
-          git push origin HEAD:${GITHUB_REF_NAME}
-
-      - name: Upload audited frontend lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: audited-frontend-lockfile
-          path: frontend/package-lock.json
-          if-no-files-found: error
-          retention-days: 7
 
       - name: Validate shell scripts
         run: bash -n deploy/backup.sh deploy/restore.sh deploy/smoke-test.sh
@@ -155,12 +135,8 @@ jobs:
           test -z "$(docker compose --env-file .env.production -f docker-compose.prod.yml port postgres 5432 2>/dev/null || true)"
           test -z "$(docker compose --env-file .env.production -f docker-compose.prod.yml port redis 6379 2>/dev/null || true)"
 
-      - name: Package validated working tree from tracked files only
-        run: |
-          rm -rf .package-root
-          mkdir -p .package-root/qualive-inviter
-          git ls-files -z | tar --null -T - -cf - | tar -C .package-root/qualive-inviter -xf -
-          (cd .package-root && zip -qr ../qualive-inviter-production-ready.zip qualive-inviter)
+      - name: Package validated source from tracked files only
+        run: git archive --format=zip --prefix=qualive-inviter/ -o qualive-inviter-production-ready.zip HEAD
 
       - name: Upload validated source archive
         uses: actions/upload-artifact@v4
