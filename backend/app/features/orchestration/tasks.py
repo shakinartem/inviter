@@ -4,19 +4,19 @@ import asyncio
 from uuid import UUID
 
 from app.db.session import AsyncSessionLocal
-from app.features.orchestration.service import OrchestrationService
+from app.features.connections.orchestration import ConnectionAwareOrchestrationService
 from app.tasks.celery_app import celery_app
 
 
 async def _claim_due(limit: int) -> list[UUID]:
     async with AsyncSessionLocal() as session:
-        service = OrchestrationService(session)
+        service = ConnectionAwareOrchestrationService(session)
         return await service.claim_due_jobs(limit=limit)
 
 
 async def _execute(job_id: UUID) -> dict:
     async with AsyncSessionLocal() as session:
-        service = OrchestrationService(session)
+        service = ConnectionAwareOrchestrationService(session)
         return await service.execute_job(job_id)
 
 
