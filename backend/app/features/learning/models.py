@@ -24,7 +24,7 @@ class ActionFeatureSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     action_job_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("action_jobs.id", ondelete="CASCADE"), nullable=False, unique=True
+        PG_UUID(as_uuid=True), ForeignKey("action_jobs.id", ondelete="CASCADE"), nullable=False
     )
     campaign_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("invite_campaigns.id", ondelete="CASCADE"), nullable=False, index=True
