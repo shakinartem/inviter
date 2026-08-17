@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_active_user
 from app.db.session import get_db_session
+from app.features.connections.intelligence import ConnectionAwareIntelligenceService
 from app.features.intelligence.schemas import (
     AudienceListResponse,
     AudienceMemberResponse,
@@ -16,7 +17,6 @@ from app.features.intelligence.schemas import (
     CommunityScoreResponse,
 )
 from app.features.intelligence.scoring import CommunityScoreInput, score_community
-from app.features.intelligence.service import IntelligenceService
 
 
 router = APIRouter(prefix="/intelligence", tags=["intelligence"])
@@ -42,7 +42,7 @@ async def enrich_community(
     user=Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> CommunityEnrichResponse:
-    service = IntelligenceService(session)
+    service = ConnectionAwareIntelligenceService(session)
     try:
         result = await service.enrich_community(
             owner_id=user.id,
@@ -72,7 +72,7 @@ async def list_audience(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=1000),
 ) -> AudienceListResponse:
-    service = IntelligenceService(session)
+    service = ConnectionAwareIntelligenceService(session)
     items, total = await service.list_audience(
         owner_id=user.id,
         platform=platform,
