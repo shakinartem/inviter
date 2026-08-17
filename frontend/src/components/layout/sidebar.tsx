@@ -12,6 +12,7 @@ import {
   BrainCircuit,
   Cable,
   Target,
+  Webhook,
 } from "lucide-react";
 
 const navItems = [
@@ -21,6 +22,7 @@ const navItems = [
   { to: "/segments", icon: Target, label: "Opportunities" },
   { to: "/campaigns", icon: Send, label: "Campaigns" },
   { to: "/learning", icon: BrainCircuit, label: "Learning" },
+  { to: "/outcome-sources", icon: Webhook, label: "Outcome Sources" },
   { to: "/connections", icon: Cable, label: "Connections" },
   { to: "/accounts", icon: Users, label: "Telegram Accounts" },
   { to: "/proxies", icon: Shield, label: "Proxies" },
