@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
 
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
@@ -51,6 +51,17 @@ class Settings(BaseSettings):
         default="http://localhost:5173,http://127.0.0.1:5173",
         alias="APP_CORS_ORIGINS",
     )
+
+    @model_validator(mode="after")
+    def validate_runtime_security(self) -> "Settings":
+        if self.environment.lower() in {"production", "prod"}:
+            if self.secret == "change-me" or len(self.secret) < 32:
+                raise ValueError("APP_SECRET must be a non-default value of at least 32 characters in production")
+            if not self.redis_password or len(self.redis_password) < 16:
+                raise ValueError("REDIS_PASSWORD must contain at least 16 characters in production")
+            if self.postgres_password == "inviter" or len(self.postgres_password) < 16:
+                raise ValueError("POSTGRES_PASSWORD must be changed and contain at least 16 characters in production")
+        return self
 
     @computed_field
     @property
