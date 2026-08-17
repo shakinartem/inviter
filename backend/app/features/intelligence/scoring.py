@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
@@ -43,6 +44,38 @@ class CommunityScoreResult:
             "growth_score": self.growth_score,
             "size_score": self.size_score,
             "penalty": self.penalty,
+        }
+
+
+@dataclass(slots=True)
+class AudienceScoreInput:
+    last_activity_at: datetime | None = None
+    messages_7d: int = 0
+    messages_30d: int = 0
+    communities_count: int = 1
+    relevance_score: float | None = None
+    intent_score: float | None = None
+    is_bot: bool = False
+    is_fake: bool = False
+    is_scam: bool = False
+    is_blacklisted: bool = False
+
+
+@dataclass(slots=True)
+class AudienceScoreResult:
+    activity_score: float
+    quality_score: float
+    relevance_score: float
+    intent_score: float
+    readiness_score: float
+
+    def as_dict(self) -> dict[str, float]:
+        return {
+            "activity_score": self.activity_score,
+            "quality_score": self.quality_score,
+            "relevance_score": self.relevance_score,
+            "intent_score": self.intent_score,
+            "readiness_score": self.readiness_score,
         }
 
 
@@ -113,4 +146,71 @@ def score_community(data: CommunityScoreInput) -> CommunityScoreResult:
         growth_score=round(growth_score, 2),
         size_score=round(size_score, 2),
         penalty=round(penalty, 2),
+    )
+
+
+def score_audience_member(
+    data: AudienceScoreInput,
+    *,
+    now: datetime | None = None,
+) -> AudienceScoreResult:
+    now = now or datetime.now(timezone.utc)
+    last_activity = data.last_activity_at
+    if last_activity and last_activity.tzinfo is None:
+        last_activity = last_activity.replace(tzinfo=timezone.utc)
+
+    recency_points = 0.0
+    if last_activity is not None:
+        age_days = max((now - last_activity).total_seconds() / 86400.0, 0.0)
+        if age_days <= 1:
+            recency_points = 40.0
+        elif age_days <= 3:
+            recency_points = 34.0
+        elif age_days <= 7:
+            recency_points = 28.0
+        elif age_days <= 14:
+            recency_points = 18.0
+        elif age_days <= 30:
+            recency_points = 10.0
+
+    messages_7d = max(data.messages_7d, 0)
+    messages_30d = max(data.messages_30d, 0)
+    communities = max(data.communities_count, 1)
+
+    activity_score = _clamp(
+        recency_points
+        + min(messages_7d, 20) / 20.0 * 35.0
+        + min(messages_30d, 60) / 60.0 * 15.0
+        + min(max(communities - 1, 0), 4) / 4.0 * 10.0
+    )
+
+    quality_score = 100.0
+    if data.is_bot:
+        quality_score -= 100.0
+    if data.is_fake:
+        quality_score -= 55.0
+    if data.is_scam:
+        quality_score -= 70.0
+    if data.is_blacklisted:
+        quality_score = 0.0
+    quality_score = _clamp(quality_score)
+
+    relevance_score = _clamp(float(data.relevance_score or 0.0))
+    intent_score = _clamp(float(data.intent_score or 0.0))
+
+    readiness = _clamp(
+        activity_score * 0.45
+        + relevance_score * 0.20
+        + quality_score * 0.15
+        + intent_score * 0.20
+    )
+    if data.is_bot or data.is_blacklisted:
+        readiness = 0.0
+
+    return AudienceScoreResult(
+        activity_score=round(activity_score, 2),
+        quality_score=round(quality_score, 2),
+        relevance_score=round(relevance_score, 2),
+        intent_score=round(intent_score, 2),
+        readiness_score=round(readiness, 2),
     )
