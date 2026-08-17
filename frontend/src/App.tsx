@@ -12,6 +12,7 @@ import SegmentsPage from "@/pages/segments";
 import CampaignsPage from "@/pages/campaigns";
 import LearningPage from "@/pages/learning";
 import OutcomeSourcesPage from "@/pages/outcome-sources";
+import YieldForecastPage from "@/pages/yield-forecast";
 import LoginPage from "@/pages/login";
 
 const queryClient = new QueryClient({
@@ -53,6 +54,7 @@ export default function App() {
             <Route path="parser" element={<ParserPage />} />
             <Route path="audience" element={<AudiencePage />} />
             <Route path="segments" element={<SegmentsPage />} />
+            <Route path="yield" element={<YieldForecastPage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
             <Route path="learning" element={<LearningPage />} />
             <Route path="outcome-sources" element={<OutcomeSourcesPage />} />
