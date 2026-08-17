@@ -16,7 +16,9 @@ from telethon.errors import (
     UserNotMutualContactError,
     UserPrivacyRestrictedError,
 )
+from telethon.tl.functions.channels import InviteToChannelRequest
 from telethon.tl.functions.contacts import SearchRequest
+from telethon.tl.functions.messages import AddChatUserRequest
 from telethon.tl.types import Channel, Chat
 
 from app.features.accounts.client_manager import TelegramClientManager
@@ -194,10 +196,35 @@ class TelegramConnector(MessengerConnector):
         client = await self.client_manager.get_client(account)
         try:
             try:
-                await client.invite_to_chat(
-                    int(destination["external_id"]),
-                    [int(target["external_user_id"])],
-                )
+                target_ref: str | int = target.get("username") or int(target["external_user_id"])
+                destination_ref: str | int = destination.get("username") or int(destination["external_id"])
+                target_entity = await client.get_entity(target_ref)
+                destination_entity = await client.get_entity(destination_ref)
+
+                if isinstance(destination_entity, Channel):
+                    await client(
+                        InviteToChannelRequest(
+                            channel=destination_entity,
+                            users=[target_entity],
+                        )
+                    )
+                elif isinstance(destination_entity, Chat):
+                    await client(
+                        AddChatUserRequest(
+                            chat_id=destination_entity.id,
+                            user_id=target_entity,
+                            fwd_limit=0,
+                        )
+                    )
+                else:
+                    return {
+                        "ok": False,
+                        "action": action,
+                        "code": "UNSUPPORTED_DESTINATION",
+                        "retryable": False,
+                        "message": "Destination is not a Telegram group/channel",
+                    }
+
                 return {"ok": True, "action": action, "code": "INVITED"}
             except UserAlreadyParticipantError:
                 return {"ok": True, "action": action, "code": "ALREADY_PARTICIPANT"}
