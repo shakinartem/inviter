@@ -12,10 +12,11 @@ from app.features.learning.service import OutcomeLearningService
 from app.features.orchestration.destinations import CampaignDestinationService
 from app.features.orchestration.models import ActionJob
 from app.features.orchestration.service import OrchestrationService
+from app.features.segments.models import CampaignAudienceMember, CampaignAudienceSource
 
 
 class ConnectionAwareOrchestrationService(OrchestrationService):
-    """Bind actions to compatible connections, stable refs and learning labels."""
+    """Bind actions to compatible connections, frozen cohorts, stable refs and labels."""
 
     async def plan_campaign(
         self,
@@ -84,9 +85,6 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
         job = job_result.scalar_one_or_none()
         learning = OutcomeLearningService(self.session)
 
-        # Freeze the feature vector before the connector mutates action state.
-        # A snapshot with no later transport event is excluded from calibration,
-        # so account/campaign cancellations do not become false negative labels.
         if (
             job is not None
             and job.status not in {"success", "failed", "cancelled"}
@@ -131,14 +129,51 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
         min_readiness_score: float,
         limit: int,
     ) -> list[AudienceMember]:
-        candidates = await super()._get_candidates(
-            owner_id=owner_id,
-            campaign=campaign,
-            platform=platform,
-            min_activity_score=min_activity_score,
-            min_readiness_score=min_readiness_score,
-            limit=limit,
+        source_result = await self.session.execute(
+            select(CampaignAudienceSource).where(
+                CampaignAudienceSource.owner_id == owner_id,
+                CampaignAudienceSource.campaign_id == campaign.id,
+            )
         )
+        source = source_result.scalar_one_or_none()
+
+        if source is not None:
+            # Use scores frozen with the campaign cohort, not mutable profile
+            # scores. This keeps planning reproducible even after later enrichment.
+            stmt = (
+                select(AudienceMember)
+                .join(
+                    CampaignAudienceMember,
+                    CampaignAudienceMember.audience_member_id == AudienceMember.id,
+                )
+                .where(
+                    CampaignAudienceMember.campaign_source_id == source.id,
+                    AudienceMember.owner_id == owner_id,
+                    AudienceMember.platform == platform,
+                    AudienceMember.is_blacklisted.is_(False),
+                    CampaignAudienceMember.activity_score >= min_activity_score,
+                    CampaignAudienceMember.readiness_score >= min_readiness_score,
+                )
+                .order_by(
+                    CampaignAudienceMember.readiness_score.desc().nullslast(),
+                    CampaignAudienceMember.intent_score.desc().nullslast(),
+                    CampaignAudienceMember.activity_score.desc().nullslast(),
+                )
+                .limit(limit)
+            )
+            result = await self.session.execute(stmt)
+            candidates = list(result.scalars().all())
+        else:
+            # Legacy campaigns created before Opportunity Segments continue to work.
+            candidates = await super()._get_candidates(
+                owner_id=owner_id,
+                campaign=campaign,
+                platform=platform,
+                min_activity_score=min_activity_score,
+                min_readiness_score=min_readiness_score,
+                limit=limit,
+            )
+
         if platform != "telegram":
             return candidates
         return [candidate for candidate in candidates if self._is_resolvable_telegram_member(candidate)]
