@@ -3,6 +3,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from telethon.errors import (
+    ChannelPrivateError,
+    ChatAdminRequiredError,
+    ChatWriteForbiddenError,
+    FloodWaitError,
+    InviteRequestSentError,
+    PeerFloodError,
+    UserAlreadyParticipantError,
+    UserBannedInChannelError,
+    UserIsBlockedError,
+    UserNotMutualContactError,
+    UserPrivacyRestrictedError,
+)
 from telethon.tl.functions.contacts import SearchRequest
 from telethon.tl.types import Channel, Chat
 
@@ -180,10 +193,47 @@ class TelegramConnector(MessengerConnector):
 
         client = await self.client_manager.get_client(account)
         try:
-            await client.invite_to_chat(
-                int(destination["external_id"]),
-                [int(target["external_user_id"])],
-            )
-            return {"ok": True, "action": action}
+            try:
+                await client.invite_to_chat(
+                    int(destination["external_id"]),
+                    [int(target["external_user_id"])],
+                )
+                return {"ok": True, "action": action, "code": "INVITED"}
+            except UserAlreadyParticipantError:
+                return {"ok": True, "action": action, "code": "ALREADY_PARTICIPANT"}
+            except InviteRequestSentError:
+                return {"ok": True, "action": action, "code": "INVITE_REQUEST_SENT"}
+            except FloodWaitError as exc:
+                return {
+                    "ok": False,
+                    "action": action,
+                    "code": "FLOOD_WAIT",
+                    "retryable": True,
+                    "retry_after": int(exc.seconds),
+                    "message": str(exc),
+                }
+            except PeerFloodError as exc:
+                return {
+                    "ok": False,
+                    "action": action,
+                    "code": "PEER_FLOOD",
+                    "retryable": True,
+                    "retry_after": 3600,
+                    "message": str(exc),
+                }
+            except UserPrivacyRestrictedError as exc:
+                return {"ok": False, "action": action, "code": "PRIVACY_RESTRICTED", "retryable": False, "message": str(exc)}
+            except UserNotMutualContactError as exc:
+                return {"ok": False, "action": action, "code": "NOT_MUTUAL_CONTACT", "retryable": False, "message": str(exc)}
+            except ChatAdminRequiredError as exc:
+                return {"ok": False, "action": action, "code": "ADMIN_REQUIRED", "retryable": False, "message": str(exc)}
+            except ChannelPrivateError as exc:
+                return {"ok": False, "action": action, "code": "CHANNEL_PRIVATE", "retryable": False, "message": str(exc)}
+            except UserBannedInChannelError as exc:
+                return {"ok": False, "action": action, "code": "USER_BANNED", "retryable": False, "message": str(exc)}
+            except UserIsBlockedError as exc:
+                return {"ok": False, "action": action, "code": "USER_BLOCKED", "retryable": False, "message": str(exc)}
+            except ChatWriteForbiddenError as exc:
+                return {"ok": False, "action": action, "code": "WRITE_FORBIDDEN", "retryable": False, "message": str(exc)}
         finally:
             await self.client_manager.release_client(account.id)
