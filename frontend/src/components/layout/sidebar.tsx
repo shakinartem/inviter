@@ -13,6 +13,7 @@ import {
   Cable,
   Target,
   Webhook,
+  TrendingUp,
 } from "lucide-react";
 
 const navItems = [
@@ -20,6 +21,7 @@ const navItems = [
   { to: "/parser", icon: Search, label: "Discovery" },
   { to: "/audience", icon: Brain, label: "Audience" },
   { to: "/segments", icon: Target, label: "Opportunities" },
+  { to: "/yield", icon: TrendingUp, label: "Expected Yield" },
   { to: "/campaigns", icon: Send, label: "Campaigns" },
   { to: "/learning", icon: BrainCircuit, label: "Learning" },
   { to: "/outcome-sources", icon: Webhook, label: "Outcome Sources" },
