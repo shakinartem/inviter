@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class WebhookSourceCreate(BaseModel):
@@ -78,7 +78,8 @@ class WebhookOutcomePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     event_id: str = Field(..., min_length=1, max_length=128)
-    action_job_id: UUID
+    action_job_id: UUID | None = None
+    experiment_assignment_id: UUID | None = None
     stage: Literal["engagement", "business"]
     event_type: str = Field(..., min_length=1, max_length=64)
     observed_at: datetime
@@ -91,6 +92,13 @@ class WebhookOutcomePayload(BaseModel):
     @classmethod
     def normalize_event_type(cls, value: str) -> str:
         return value.strip().lower().replace(" ", "_")
+
+    @model_validator(mode="after")
+    def require_exactly_one_attribution_key(self) -> "WebhookOutcomePayload":
+        supplied = int(self.action_job_id is not None) + int(self.experiment_assignment_id is not None)
+        if supplied != 1:
+            raise ValueError("Provide exactly one of action_job_id or experiment_assignment_id")
+        return self
 
 
 class WebhookIngestResponse(BaseModel):
