@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import type { InviteCampaignListItem, InviteCampaignResponse, CampaignCreatePayload, InviteTaskResponse } from "@/types";
+import type { InviteCampaignListItem, InviteCampaignResponse, InviteTaskResponse, InviteSettingsPayload } from "@/types";
 
 export type CampaignActionStats = {
   campaign_id: string;
@@ -15,6 +15,14 @@ export type CampaignPlanPayload = {
   min_activity_score?: number;
   min_readiness_score?: number;
   account_ids?: string[] | null;
+};
+
+export type CanonicalCampaignCreatePayload = {
+  title: string;
+  target_community_id: string;
+  source_type?: "parsed_list";
+  notes?: string | null;
+  settings?: InviteSettingsPayload;
 };
 
 export function useCampaigns(params?: { status?: string; skip?: number; limit?: number }) {
@@ -65,8 +73,8 @@ export function useCampaignTasks(id: string | undefined) {
 export function useCreateCampaign() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: CampaignCreatePayload) => {
-      const { data } = await apiClient.post<InviteCampaignResponse>("/campaigns", payload);
+    mutationFn: async (payload: CanonicalCampaignCreatePayload) => {
+      const { data } = await apiClient.post<InviteCampaignResponse>("/orchestration/campaigns", payload);
       return data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["campaigns"] }),
