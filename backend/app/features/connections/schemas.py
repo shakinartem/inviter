@@ -64,7 +64,7 @@ class ConnectionResponse(BaseModel):
     last_seen_at: datetime | None
     last_used_at: datetime | None
     last_checked_at: datetime | None
-    metadata: dict[str, Any] | None = Field(default=None, validation_alias="extra_data")
+    metadata: dict[str, Any] | None = None
     notes: str | None
     has_credentials: bool = False
     connector_available: bool = False
