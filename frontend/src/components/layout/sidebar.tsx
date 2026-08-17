@@ -14,6 +14,7 @@ import {
   Target,
   Webhook,
   TrendingUp,
+  Layers3,
 } from "lucide-react";
 
 const navItems = [
@@ -22,6 +23,7 @@ const navItems = [
   { to: "/audience", icon: Brain, label: "Audience" },
   { to: "/segments", icon: Target, label: "Opportunities" },
   { to: "/yield", icon: TrendingUp, label: "Expected Yield" },
+  { to: "/portfolio", icon: Layers3, label: "Portfolio" },
   { to: "/campaigns", icon: Send, label: "Campaigns" },
   { to: "/learning", icon: BrainCircuit, label: "Learning" },
   { to: "/outcome-sources", icon: Webhook, label: "Outcome Sources" },
