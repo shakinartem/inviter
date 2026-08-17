@@ -7,8 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_active_user
 from app.db.session import get_db_session
+from app.features.learning.feedback import FeedbackQueueService
 from app.features.learning.schemas import (
     CalibrationResponse,
+    FeedbackActionListResponse,
+    FeedbackActionResponse,
     LearningOverviewResponse,
     ObservedOutcomeCreate,
     OutcomeEventListResponse,
@@ -45,6 +48,28 @@ async def record_outcome(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return OutcomeEventResponse.model_validate(event)
+
+
+@router.get("/actions", response_model=FeedbackActionListResponse)
+async def feedback_actions(
+    user=Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_db_session),
+    campaign_id: UUID | None = Query(default=None),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> FeedbackActionListResponse:
+    items, total = await FeedbackQueueService(session).list_actions(
+        owner_id=user.id,
+        campaign_id=campaign_id,
+        skip=skip,
+        limit=limit,
+    )
+    return FeedbackActionListResponse(
+        items=[FeedbackActionResponse(**item) for item in items],
+        total=total,
+        skip=skip,
+        limit=limit,
+    )
 
 
 @router.get("/outcomes", response_model=OutcomeEventListResponse)
