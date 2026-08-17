@@ -110,3 +110,31 @@ class CalibrationResponse(BaseModel):
     observed_rate: float
     buckets: list[CalibrationRateRow]
     by_strongest_signal: list[CalibrationRateRow]
+
+
+class ObserverCursorResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    campaign_id: UUID
+    platform: str
+    status: str
+    last_observed_at: datetime | None
+    last_run_at: datetime | None
+    last_success_at: datetime | None
+    last_error: str | None
+    messages_seen: int
+    outcomes_created: int
+    run_count: int
+
+
+class ObserverScanResponse(BaseModel):
+    campaign_id: UUID
+    platform: str | None = None
+    since: datetime | None = None
+    messages_seen: int = 0
+    outcomes_created: int = 0
+    last_observed_at: datetime | None = None
+    skipped: bool = False
+    reason: str | None = None
+    error: str | None = None
