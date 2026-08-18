@@ -37,6 +37,25 @@ export type AccountCapacityPool = {
   assessments: AccountCapacityAssessment[];
 };
 
+export type AccountThroughputForecast = {
+  platform: string;
+  desired_actions: number;
+  campaign_daily_limit: number;
+  eligible_accounts: number;
+  quarantined_accounts: number;
+  safe_daily_capacity: number;
+  queued_jobs: number;
+  effective_new_daily_capacity: number;
+  estimated_days: number | null;
+  estimated_completion_at: string | null;
+  deadline_days: number | null;
+  required_daily_capacity_for_deadline: number | null;
+  daily_capacity_shortfall: number;
+  additional_full_health_accounts_needed: number;
+  status: "ready" | "capacity_shortfall" | "no_safe_capacity";
+  warnings: string[];
+};
+
 export function useAccountCapacityRefresh() {
   return useMutation({
     mutationFn: async (payload: { platform?: string; campaign_daily_limit: number; persist_snapshots?: boolean }) => {
@@ -44,6 +63,20 @@ export function useAccountCapacityRefresh() {
         platform: payload.platform ?? "telegram",
         campaign_daily_limit: payload.campaign_daily_limit,
         persist_snapshots: payload.persist_snapshots ?? true,
+      });
+      return data;
+    },
+  });
+}
+
+export function useAccountThroughputForecast() {
+  return useMutation({
+    mutationFn: async (payload: { desired_actions: number; campaign_daily_limit: number; deadline_days?: number | null }) => {
+      const { data } = await apiClient.post<AccountThroughputForecast>("/account-capacity/forecast", {
+        platform: "telegram",
+        desired_actions: payload.desired_actions,
+        campaign_daily_limit: payload.campaign_daily_limit,
+        deadline_days: payload.deadline_days ?? null,
       });
       return data;
     },
