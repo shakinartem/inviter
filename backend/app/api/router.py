@@ -4,6 +4,7 @@ from app.api.v1.health import router as health_router
 from app.core.config import settings
 from app.core.security import auth_backend, fastapi_users
 from app.features.accounts.api import router as accounts_router
+from app.features.accounts.capacity_api import router as account_capacity_router
 from app.features.allocations.api import router as allocations_router
 from app.features.allocations.frontier_api import router as allocation_frontier_router
 from app.features.auth.schemas import UserCreate, UserRead, UserUpdate
@@ -52,6 +53,7 @@ api_router.include_router(
 )
 api_router.include_router(health_router, prefix="/health", tags=["health"])
 api_router.include_router(accounts_router, tags=["accounts"])
+api_router.include_router(account_capacity_router, tags=["account-capacity", "risk"])
 api_router.include_router(connections_router, tags=["connections"])
 api_router.include_router(connectors_router, tags=["connectors"])
 api_router.include_router(discovery_router, tags=["discovery"])
