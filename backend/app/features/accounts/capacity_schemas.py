@@ -51,6 +51,32 @@ class AccountCapacityRefreshRequest(BaseModel):
     persist_snapshots: bool = True
 
 
+class AccountThroughputForecastRequest(BaseModel):
+    platform: str = Field(default="telegram", min_length=1, max_length=32)
+    desired_actions: int = Field(ge=1, le=10_000_000)
+    campaign_daily_limit: int = Field(default=30, ge=1, le=1000)
+    deadline_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class AccountThroughputForecastResponse(BaseModel):
+    platform: str
+    desired_actions: int
+    campaign_daily_limit: int
+    eligible_accounts: int
+    quarantined_accounts: int
+    safe_daily_capacity: int
+    queued_jobs: int
+    effective_new_daily_capacity: int
+    estimated_days: float | None
+    estimated_completion_at: datetime | None
+    deadline_days: int | None
+    required_daily_capacity_for_deadline: int | None
+    daily_capacity_shortfall: int
+    additional_full_health_accounts_needed: int
+    status: Literal["ready", "capacity_shortfall", "no_safe_capacity"]
+    warnings: list[str]
+
+
 class AccountCapacityHistoryResponse(BaseModel):
     account_id: UUID
     items: list[dict]
