@@ -24,6 +24,7 @@ import {
   Activity,
   ArrowRightLeft,
   TimerReset,
+  CheckCircle2,
 } from "lucide-react";
 
 const navItems = [
@@ -50,6 +51,7 @@ const navItems = [
   { to: "/account-capacity", icon: ShieldCheck, label: "Account Capacity" },
   { to: "/adaptive-execution", icon: ArrowRightLeft, label: "Adaptive Execution" },
   { to: "/execution-sla", icon: TimerReset, label: "Execution SLA" },
+  { to: "/execution-sla-calibration", icon: CheckCircle2, label: "SLA Calibration" },
   { to: "/accounts", icon: Users, label: "Telegram Accounts" },
   { to: "/proxies", icon: Shield, label: "Proxies" },
   { to: "/settings", icon: Settings, label: "Settings" },

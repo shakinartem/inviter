@@ -11,7 +11,7 @@ from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class ExecutionSLAForecastSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Immutable prediction-time snapshot for later execution SLA calibration."""
+    """Prediction-time execution snapshot plus mature observed outcome label."""
 
     __tablename__ = "execution_sla_forecasts"
 
@@ -38,8 +38,16 @@ class ExecutionSLAForecastSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     input_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
     scenarios_snapshot: Mapped[list] = mapped_column(JSON, nullable=False)
 
+    # `actual_met_sla` calibrates fixed-workload completion probability for the
+    # CURRENT reserve scenario. It does not pretend to label schedule continuity.
     actual_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     actual_met_sla: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    label_status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, index=True)
+    queue_eligible_at_forecast: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    actual_successful_actions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actual_hard_failure_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    label_finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    label_notes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
         Index("ix_execution_sla_forecasts_owner_created", "owner_id", "created_at"),
