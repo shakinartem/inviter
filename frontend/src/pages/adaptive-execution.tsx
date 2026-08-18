@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowRightLeft, RefreshCw, ShieldAlert, Workflow } from "lucide-react";
+import { ArrowRightLeft, RefreshCw, ShieldAlert, ShieldCheck, Workflow } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -8,16 +8,21 @@ import {
   useAdaptiveEvents,
   useAdaptivePreview,
   useAdaptiveRebalance,
+  useCampaignResilience,
 } from "@/hooks/use-adaptive-execution";
+import { useCampaigns } from "@/hooks/use-campaigns";
 
 export default function AdaptiveExecutionPage() {
   const capacity = useAccountCapacityRefresh();
   const preview = useAdaptivePreview();
   const rebalance = useAdaptiveRebalance();
   const events = useAdaptiveEvents(50);
+  const { data: campaigns } = useCampaigns({ skip: 0, limit: 500 });
   const [dailyLimit, setDailyLimit] = useState(30);
   const [sourceAccountId, setSourceAccountId] = useState("");
   const [maxJobs, setMaxJobs] = useState(500);
+  const [resilienceCampaignId, setResilienceCampaignId] = useState<string | null>(null);
+  const resilience = useCampaignResilience(resilienceCampaignId);
 
   const accounts = useMemo(
     () => [...(capacity.data?.assessments ?? [])].sort((a, b) => b.risk_score - a.risk_score),
@@ -25,6 +30,10 @@ export default function AdaptiveExecutionPage() {
   );
   const selected = accounts.find((item) => item.account_id === sourceAccountId) ?? null;
   const plan = rebalance.data ?? preview.data;
+  const resilienceCampaigns = useMemo(
+    () => (campaigns ?? []).filter((campaign) => ["active", "paused", "draft"].includes(campaign.status)),
+    [campaigns],
+  );
 
   const assess = async () => {
     try {
@@ -64,6 +73,7 @@ export default function AdaptiveExecutionPage() {
       });
       toast.success(`Reassigned ${result.moved_jobs} untouched jobs.`);
       await events.refetch();
+      if (resilienceCampaignId) await resilience.refetch();
     } catch {
       toast.error("Adaptive rebalance failed.");
     }
@@ -137,51 +147,90 @@ export default function AdaptiveExecutionPage() {
         )}
       </section>
 
+      <section className="space-y-4 rounded-xl border border-black/5 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-ink">Campaign N-1 resilience</h2>
+            <p className="mt-1 max-w-3xl text-xs text-muted">
+              Checks whether current emergency capacity can absorb the loss of the single highest-capacity campaign account while preserving normal planned throughput.
+            </p>
+          </div>
+          <label className="min-w-72 space-y-1 text-xs font-medium text-muted">
+            Campaign
+            <select
+              value={resilienceCampaignId ?? ""}
+              onChange={(event) => setResilienceCampaignId(event.target.value || null)}
+              className="block w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink"
+            >
+              <option value="">Select campaign…</option>
+              {resilienceCampaigns.map((campaign) => (
+                <option key={campaign.id} value={campaign.id}>{campaign.title} · {campaign.status}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {resilience.data && (
+          <>
+            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+              <div className="rounded-lg bg-stone-50 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Reserve</p><p className="mt-2 text-xl font-semibold text-ink">{resilience.data.reserve_capacity_percentage.toFixed(0)}%</p></div>
+              <div className="rounded-lg bg-stone-50 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Normal/day</p><p className="mt-2 text-xl font-semibold text-ink">{resilience.data.normal_daily_capacity}</p></div>
+              <div className="rounded-lg bg-stone-50 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Emergency/day</p><p className="mt-2 text-xl font-semibold text-ink">{resilience.data.emergency_daily_capacity}</p></div>
+              <div className="rounded-lg bg-stone-50 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Headroom/day</p><p className="mt-2 text-xl font-semibold text-ink">{resilience.data.reserved_failover_headroom}</p></div>
+              <div className="rounded-lg bg-stone-50 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">N-1 margin</p><p className={`mt-2 text-xl font-semibold ${resilience.data.n_minus_one_margin >= 0 ? "text-emerald-700" : "text-red-700"}`}>{resilience.data.n_minus_one_margin >= 0 ? "+" : ""}{resilience.data.n_minus_one_margin}/day</p></div>
+              <div className="rounded-lg bg-stone-50 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Status</p><p className={`mt-2 text-sm font-semibold ${resilience.data.n_minus_one_covered ? "text-emerald-700" : "text-amber-700"}`}>{resilience.data.status.replace(/_/g, " ")}</p></div>
+            </div>
+
+            <div className={`rounded-lg border p-4 text-sm ${resilience.data.n_minus_one_covered ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+              <div className="flex items-start gap-2">
+                {resilience.data.n_minus_one_covered ? <ShieldCheck className="mt-0.5 h-4 w-4 text-emerald-700" /> : <ShieldAlert className="mt-0.5 h-4 w-4 text-amber-700" />}
+                <div>
+                  <p className="font-medium text-ink">
+                    {resilience.data.n_minus_one_covered
+                      ? "This campaign pool is N-1 ready at current normal throughput."
+                      : "Current pool/reserve cannot guarantee N-1 throughput."}
+                  </p>
+                  <p className="mt-1 text-xs text-muted">
+                    Worst single-account loss: {resilience.data.worst_single_account_loss_capacity}/day · surviving emergency capacity: {resilience.data.n_minus_one_surviving_capacity}/day · resilience ratio: {resilience.data.resilience_ratio.toFixed(2)}×
+                    {resilience.data.recommended_min_reserve_percentage != null ? ` · approximate minimum reserve ${resilience.data.recommended_min_reserve_percentage.toFixed(0)}%` : ""}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {resilience.data.warnings.length > 0 && (
+              <div className="space-y-1 text-xs text-muted">
+                {resilience.data.warnings.map((warning) => <p key={warning}>• {warning}</p>)}
+              </div>
+            )}
+
+            {resilience.data.accounts.length > 0 && (
+              <div className="overflow-auto rounded-lg border border-black/5">
+                <table className="w-full min-w-[720px] text-left text-sm">
+                  <thead className="bg-stone-50 text-xs text-muted"><tr><th className="px-3 py-2">Account</th><th className="px-3 py-2">Health</th><th className="px-3 py-2">Normal/day</th><th className="px-3 py-2">Emergency/day</th><th className="px-3 py-2">Reserved</th></tr></thead>
+                  <tbody>{resilience.data.accounts.map((account) => <tr key={account.account_id} className="border-t border-black/5"><td className="px-3 py-3 font-medium text-ink">{account.label}</td><td className="px-3 py-3">{account.health_score.toFixed(1)}</td><td className="px-3 py-3">{account.normal_daily_capacity}</td><td className="px-3 py-3">{account.emergency_daily_capacity}</td><td className="px-3 py-3">{account.reserved_headroom}</td></tr>)}</tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </section>
+
       {plan && (
         <>
           <div className="grid gap-3 md:grid-cols-4">
-            <div className="rounded-xl border border-black/5 bg-white p-4 shadow-sm">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted"><Workflow className="h-4 w-4" /> Movable</div>
-              <p className="mt-3 text-2xl font-semibold text-ink">{plan.movable_jobs}</p>
-            </div>
-            <div className="rounded-xl border border-black/5 bg-white p-4 shadow-sm">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted"><ArrowRightLeft className="h-4 w-4" /> Reassigned</div>
-              <p className="mt-3 text-2xl font-semibold text-ink">{plan.moved_jobs}</p>
-            </div>
-            <div className="rounded-xl border border-black/5 bg-white p-4 shadow-sm">
-              <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted"><ShieldAlert className="h-4 w-4" /> Pinned</div>
-              <p className="mt-3 text-2xl font-semibold text-ink">{plan.untouched_started_or_retry_jobs}</p>
-            </div>
-            <div className="rounded-xl border border-black/5 bg-white p-4 shadow-sm">
-              <div className="text-xs uppercase tracking-wide text-muted">No safe target</div>
-              <p className="mt-3 text-2xl font-semibold text-ink">{plan.no_safe_target_jobs}</p>
-            </div>
+            <div className="rounded-xl border border-black/5 bg-white p-4 shadow-sm"><div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted"><Workflow className="h-4 w-4" /> Movable</div><p className="mt-3 text-2xl font-semibold text-ink">{plan.movable_jobs}</p></div>
+            <div className="rounded-xl border border-black/5 bg-white p-4 shadow-sm"><div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted"><ArrowRightLeft className="h-4 w-4" /> Reassigned</div><p className="mt-3 text-2xl font-semibold text-ink">{plan.moved_jobs}</p></div>
+            <div className="rounded-xl border border-black/5 bg-white p-4 shadow-sm"><div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted"><ShieldAlert className="h-4 w-4" /> Pinned</div><p className="mt-3 text-2xl font-semibold text-ink">{plan.untouched_started_or_retry_jobs}</p></div>
+            <div className="rounded-xl border border-black/5 bg-white p-4 shadow-sm"><div className="text-xs uppercase tracking-wide text-muted">No safe target</div><p className="mt-3 text-2xl font-semibold text-ink">{plan.no_safe_target_jobs}</p></div>
           </div>
 
           <section className="overflow-hidden rounded-xl border border-black/5 bg-white shadow-sm">
-            <div className="border-b border-black/5 p-4">
-              <h2 className="text-sm font-semibold text-ink">Failover plan</h2>
-              <p className="mt-1 text-xs text-muted">
-                New schedules are never earlier than the original schedule and stay under risk-adjusted daily capacity.
-              </p>
-            </div>
+            <div className="border-b border-black/5 p-4"><h2 className="text-sm font-semibold text-ink">Failover plan</h2><p className="mt-1 text-xs text-muted">New schedules are never earlier than the original schedule and stay under risk-adjusted emergency capacity.</p></div>
             <div className="overflow-auto">
               <table className="w-full min-w-[1000px] text-left text-sm">
-                <thead className="bg-stone-50 text-xs text-muted">
-                  <tr><th className="px-3 py-2">From</th><th className="px-3 py-2">To</th><th className="px-3 py-2">Old schedule</th><th className="px-3 py-2">New schedule</th><th className="px-3 py-2">Target health</th><th className="px-3 py-2">Safe/day</th></tr>
-                </thead>
-                <tbody>
-                  {plan.moves.slice(0, 200).map((move) => (
-                    <tr key={move.job_id} className="border-t border-black/5">
-                      <td className="px-3 py-3">{move.from_account_label}</td>
-                      <td className="px-3 py-3 font-medium text-ink">{move.to_account_label}</td>
-                      <td className="px-3 py-3 text-xs text-muted">{new Date(move.previous_scheduled_at).toLocaleString()}</td>
-                      <td className="px-3 py-3 text-xs text-muted">{new Date(move.new_scheduled_at).toLocaleString()}</td>
-                      <td className="px-3 py-3">{move.target_health_score.toFixed(1)}</td>
-                      <td className="px-3 py-3">{move.target_daily_capacity}</td>
-                    </tr>
-                  ))}
-                </tbody>
+                <thead className="bg-stone-50 text-xs text-muted"><tr><th className="px-3 py-2">From</th><th className="px-3 py-2">To</th><th className="px-3 py-2">Old schedule</th><th className="px-3 py-2">New schedule</th><th className="px-3 py-2">Target health</th><th className="px-3 py-2">Safe/day</th></tr></thead>
+                <tbody>{plan.moves.slice(0, 200).map((move) => <tr key={move.job_id} className="border-t border-black/5"><td className="px-3 py-3">{move.from_account_label}</td><td className="px-3 py-3 font-medium text-ink">{move.to_account_label}</td><td className="px-3 py-3 text-xs text-muted">{new Date(move.previous_scheduled_at).toLocaleString()}</td><td className="px-3 py-3 text-xs text-muted">{new Date(move.new_scheduled_at).toLocaleString()}</td><td className="px-3 py-3">{move.target_health_score.toFixed(1)}</td><td className="px-3 py-3">{move.target_daily_capacity}</td></tr>)}</tbody>
               </table>
             </div>
           </section>
@@ -189,24 +238,11 @@ export default function AdaptiveExecutionPage() {
       )}
 
       <section className="overflow-hidden rounded-xl border border-black/5 bg-white shadow-sm">
-        <div className="border-b border-black/5 p-4">
-          <h2 className="text-sm font-semibold text-ink">Recent assignment events</h2>
-          <p className="mt-1 text-xs text-muted">Immutable audit trail of pre-execution account changes.</p>
-        </div>
+        <div className="border-b border-black/5 p-4"><h2 className="text-sm font-semibold text-ink">Recent assignment events</h2><p className="mt-1 text-xs text-muted">Immutable audit trail of pre-execution account changes.</p></div>
         <div className="overflow-auto">
           <table className="w-full min-w-[900px] text-left text-sm">
             <thead className="bg-stone-50 text-xs text-muted"><tr><th className="px-3 py-2">Time</th><th className="px-3 py-2">Reason</th><th className="px-3 py-2">From account</th><th className="px-3 py-2">To account</th><th className="px-3 py-2">Schedule shift</th></tr></thead>
-            <tbody>
-              {(events.data ?? []).map((event) => (
-                <tr key={event.id} className="border-t border-black/5">
-                  <td className="px-3 py-3 text-xs text-muted">{new Date(event.created_at).toLocaleString()}</td>
-                  <td className="px-3 py-3">{event.reason.replace(/_/g, " ")}</td>
-                  <td className="px-3 py-3 font-mono text-xs">{event.from_account_id.slice(0, 8)}</td>
-                  <td className="px-3 py-3 font-mono text-xs">{event.to_account_id.slice(0, 8)}</td>
-                  <td className="px-3 py-3 text-xs text-muted">{new Date(event.previous_scheduled_at).toLocaleString()} → {new Date(event.new_scheduled_at).toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
+            <tbody>{(events.data ?? []).map((event) => <tr key={event.id} className="border-t border-black/5"><td className="px-3 py-3 text-xs text-muted">{new Date(event.created_at).toLocaleString()}</td><td className="px-3 py-3">{event.reason.replace(/_/g, " ")}</td><td className="px-3 py-3 font-mono text-xs">{event.from_account_id.slice(0, 8)}</td><td className="px-3 py-3 font-mono text-xs">{event.to_account_id.slice(0, 8)}</td><td className="px-3 py-3 text-xs text-muted">{new Date(event.previous_scheduled_at).toLocaleString()} → {new Date(event.new_scheduled_at).toLocaleString()}</td></tr>)}</tbody>
           </table>
         </div>
       </section>

@@ -25,6 +25,7 @@ class ProductRouterWiringTests(unittest.TestCase):
             "/adaptive-execution/preview",
             "/adaptive-execution/rebalance",
             "/adaptive-execution/events",
+            "/adaptive-execution/resilience/{campaign_id}",
         }
         self.assertTrue(expected.issubset(paths), f"Missing routes: {sorted(expected - paths)}")
 

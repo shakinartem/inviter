@@ -103,6 +103,7 @@ class CampaignDestinationService:
 
         config = {
             "daily_limit_per_account": 30,
+            "reserve_capacity_percentage": 0.0,
             "invite_delay_min": 45,
             "invite_delay_max": 180,
             "pause_after_every": 10,

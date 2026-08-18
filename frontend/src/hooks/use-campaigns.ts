@@ -31,6 +31,14 @@ export type CampaignPlanResult = {
   candidate_pool_size?: number | null;
   treatment_count?: number | null;
   holdout_count?: number | null;
+  risk_adjusted_accounts?: number;
+  risk_adjusted_daily_capacity?: number;
+  account_daily_capacities?: Record<string, number>;
+  reserve_capacity_percentage?: number;
+  normal_daily_capacity?: number;
+  emergency_daily_capacity?: number;
+  reserved_failover_headroom?: number;
+  normal_account_daily_capacities?: Record<string, number>;
 };
 
 export type CanonicalCampaignCreatePayload = {

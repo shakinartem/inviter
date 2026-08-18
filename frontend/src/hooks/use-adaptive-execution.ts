@@ -42,6 +42,34 @@ export type AdaptiveEvent = {
   created_at: string;
 };
 
+export type ResilienceAccount = {
+  account_id: string;
+  label: string;
+  health_score: number;
+  emergency_daily_capacity: number;
+  normal_daily_capacity: number;
+  reserved_headroom: number;
+};
+
+export type CampaignResilience = {
+  campaign_id: string;
+  campaign_title: string;
+  reserve_capacity_percentage: number;
+  campaign_accounts: number;
+  normal_daily_capacity: number;
+  emergency_daily_capacity: number;
+  reserved_failover_headroom: number;
+  worst_single_account_loss_capacity: number;
+  n_minus_one_surviving_capacity: number;
+  n_minus_one_margin: number;
+  n_minus_one_covered: boolean;
+  resilience_ratio: number;
+  recommended_min_reserve_percentage: number | null;
+  status: string;
+  warnings: string[];
+  accounts: ResilienceAccount[];
+};
+
 type RebalancePayload = {
   source_account_id: string;
   campaign_id?: string | null;
@@ -77,6 +105,7 @@ export function useAdaptiveRebalance() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["adaptive-execution-events"] });
+      queryClient.invalidateQueries({ queryKey: ["campaign-resilience"] });
     },
   });
 }
@@ -86,6 +115,19 @@ export function useAdaptiveEvents(limit = 100) {
     queryKey: ["adaptive-execution-events", limit],
     queryFn: async () => {
       const { data } = await apiClient.get<AdaptiveEvent[]>(`/adaptive-execution/events?limit=${limit}`);
+      return data;
+    },
+  });
+}
+
+export function useCampaignResilience(campaignId: string | null) {
+  return useQuery({
+    queryKey: ["campaign-resilience", campaignId],
+    enabled: Boolean(campaignId),
+    queryFn: async () => {
+      const { data } = await apiClient.get<CampaignResilience>(
+        `/adaptive-execution/resilience/${campaignId}`,
+      );
       return data;
     },
   });

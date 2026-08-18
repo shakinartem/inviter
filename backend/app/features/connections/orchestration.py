@@ -54,8 +54,6 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
         if campaign.source_type == "uploaded_list":
             raise ValueError("uploaded_list source is not connected to Audience Intelligence yet")
 
-        # Risk policy is deliberately one-way: it can only reduce the campaign's
-        # configured per-account capacity, never raise it.
         self._risk_campaign_limit = max(int(campaign.daily_limit_per_account), 1)
         self._risk_limits: dict[UUID, int] = {}
         self._risk_account_cache: list[Account] | None = None
@@ -107,10 +105,29 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
             finally:
                 self._active_experiment_treatment_ids = None
 
+            now = datetime.now(timezone.utc)
+            normal_caps = {
+                account.id: self._effective_daily_limit(account, campaign, now)
+                for account in preflight_accounts
+            }
+            emergency_caps = {
+                account.id: int(self._risk_limits.get(account.id, normal_caps[account.id]))
+                for account in preflight_accounts
+            }
+            normal_total = sum(normal_caps.values())
+            emergency_total = sum(emergency_caps.values())
+
             result["risk_adjusted_accounts"] = len(self._risk_limits)
-            result["risk_adjusted_daily_capacity"] = sum(self._risk_limits.values())
+            result["risk_adjusted_daily_capacity"] = emergency_total
             result["account_daily_capacities"] = {
                 str(account_id): capacity for account_id, capacity in self._risk_limits.items()
+            }
+            result["reserve_capacity_percentage"] = float(campaign.reserve_capacity_percentage or 0.0)
+            result["normal_daily_capacity"] = normal_total
+            result["emergency_daily_capacity"] = emergency_total
+            result["reserved_failover_headroom"] = max(emergency_total - normal_total, 0)
+            result["normal_account_daily_capacities"] = {
+                str(account_id): capacity for account_id, capacity in normal_caps.items()
             }
 
             jobs_result = await self.session.execute(
@@ -220,8 +237,6 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
                 if next_attempt is not None:
                     retry_after = max(int((self._aware(next_attempt) - now).total_seconds()), 1)
 
-                # Move only untouched future jobs before the risk controller shifts
-                # anything that must remain pinned beyond the cooldown.
                 if code in HARD_COOLDOWN_CODES:
                     adaptive = await AdaptiveExecutionService(self.session).rebalance_account(
                         owner_id=job.owner_id,
@@ -299,7 +314,12 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
     ) -> int:
         configured = super()._effective_daily_limit(account, campaign, now)
         risk_limit = getattr(self, "_risk_limits", {}).get(account.id, configured)
-        return max(min(configured, int(risk_limit)), 1)
+        emergency_limit = max(min(configured, int(risk_limit)), 1)
+        reserve_percentage = min(max(float(campaign.reserve_capacity_percentage or 0.0), 0.0), 50.0)
+        if reserve_percentage <= 0.0:
+            return emergency_limit
+        normal_limit = max(int(emergency_limit * (1.0 - reserve_percentage / 100.0)), 1)
+        return min(normal_limit, emergency_limit)
 
     async def _get_candidates(
         self,
