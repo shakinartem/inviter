@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 
 export type AccountHazard = {
@@ -73,6 +73,47 @@ export type ExecutionSLAHistoryItem = {
   created_at: string;
 };
 
+export type SLACalibrationBucket = {
+  lower_bound: number;
+  upper_bound: number;
+  samples: number;
+  mean_prediction: number | null;
+  observed_completion_rate: number | null;
+  brier_score: number | null;
+};
+
+export type SLACalibration = {
+  model_version: string;
+  campaign_id: string | null;
+  labeled_samples: number;
+  ineligible_samples: number;
+  pending_mature_samples: number;
+  mean_prediction: number | null;
+  observed_completion_rate: number | null;
+  calibration_bias: number | null;
+  brier_score: number | null;
+  expected_calibration_error: number | null;
+  status: string;
+  warnings: string[];
+  buckets: SLACalibrationBucket[];
+};
+
+export type SLALabelAudit = {
+  id: string;
+  campaign_id: string;
+  remaining_actions: number;
+  forecast_created_at: string;
+  deadline_at: string;
+  predicted_completion_probability: number | null;
+  label_status: string;
+  queue_eligible_at_forecast: boolean | null;
+  actual_successful_actions: number | null;
+  actual_hard_failure_days: number | null;
+  actual_met_sla: boolean | null;
+  actual_completed_at: string | null;
+  label_finalized_at: string | null;
+};
+
 export function useExecutionSLAForecast() {
   return useMutation({
     mutationFn: async (payload: {
@@ -104,6 +145,50 @@ export function useExecutionSLAHistory(campaignId: string | null, limit = 30) {
         params: { campaign_id: campaignId, limit },
       });
       return data;
+    },
+  });
+}
+
+export function useExecutionSLACalibration(campaignId: string | null = null) {
+  return useQuery({
+    queryKey: ["execution-sla-calibration", campaignId],
+    queryFn: async () => {
+      const { data } = await apiClient.get<SLACalibration>("/execution-sla/calibration", {
+        params: campaignId ? { campaign_id: campaignId } : {},
+      });
+      return data;
+    },
+  });
+}
+
+export function useExecutionSLALabels(campaignId: string | null = null, limit = 50) {
+  return useQuery({
+    queryKey: ["execution-sla-labels", campaignId, limit],
+    queryFn: async () => {
+      const { data } = await apiClient.get<SLALabelAudit[]>("/execution-sla/labels", {
+        params: { ...(campaignId ? { campaign_id: campaignId } : {}), limit },
+      });
+      return data;
+    },
+  });
+}
+
+export function useFinalizeExecutionSLA() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (limit = 250) => {
+      const { data } = await apiClient.post<{
+        examined: number;
+        labeled: number;
+        ineligible_queue: number;
+        still_pending: number;
+      }>(`/execution-sla/finalize?limit=${limit}`);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["execution-sla-calibration"] });
+      queryClient.invalidateQueries({ queryKey: ["execution-sla-labels"] });
+      queryClient.invalidateQueries({ queryKey: ["execution-sla-history"] });
     },
   });
 }
