@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import { AppLayout } from "@/components/layout/layout";
 import DashboardPage from "@/pages/dashboard";
 import AccountsPage from "@/pages/accounts";
+import AccountCapacityPage from "@/pages/account-capacity";
 import ConnectionsPage from "@/pages/connections";
 import ProxiesPage from "@/pages/proxies";
 import ParserPage from "@/pages/parser";
@@ -52,6 +53,7 @@ export default function App() {
             <Route index element={<DashboardPage />} />
             <Route path="connections" element={<ConnectionsPage />} />
             <Route path="accounts" element={<AccountsPage />} />
+            <Route path="account-capacity" element={<AccountCapacityPage />} />
             <Route path="proxies" element={<ProxiesPage />} />
             <Route path="parser" element={<ParserPage />} />
             <Route path="audience" element={<AudiencePage />} />
