@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -36,10 +35,7 @@ def current_workload_completion_probability(snapshot: ExecutionSLAForecastSnapsh
     usable = [item for item in scenarios if isinstance(item, dict)]
     if not usable:
         return None
-    current = min(
-        usable,
-        key=lambda item: abs(float(item.get("reserve_percentage", 0.0)) - reserve),
-    )
+    current = min(usable, key=lambda item: abs(float(item.get("reserve_percentage", 0.0)) - reserve))
     value = current.get("modelled_workload_completion_probability")
     if value is None:
         return None
@@ -59,10 +55,7 @@ def calibration_metrics(predictions: list[float], outcomes: list[int]) -> dict:
             "buckets": [],
         }
 
-    pairs = [
-        (min(max(float(prediction), 0.0), 1.0), 1 if int(outcome) else 0)
-        for prediction, outcome in zip(predictions, outcomes)
-    ]
+    pairs = [(min(max(float(p), 0.0), 1.0), 1 if int(y) else 0) for p, y in zip(predictions, outcomes)]
     n = len(pairs)
     mean_prediction = sum(p for p, _ in pairs) / n
     observed = sum(y for _, y in pairs) / n
@@ -73,32 +66,28 @@ def calibration_metrics(predictions: list[float], outcomes: list[int]) -> dict:
     for lower, upper in CALIBRATION_BUCKETS:
         selected = [(p, y) for p, y in pairs if lower <= p < upper]
         if not selected:
-            buckets.append(
-                {
-                    "lower_bound": lower,
-                    "upper_bound": min(upper, 1.0),
-                    "samples": 0,
-                    "mean_prediction": None,
-                    "observed_completion_rate": None,
-                    "brier_score": None,
-                }
-            )
+            buckets.append({
+                "lower_bound": lower,
+                "upper_bound": min(upper, 1.0),
+                "samples": 0,
+                "mean_prediction": None,
+                "observed_completion_rate": None,
+                "brier_score": None,
+            })
             continue
         count = len(selected)
         bucket_prediction = sum(p for p, _ in selected) / count
         bucket_observed = sum(y for _, y in selected) / count
         bucket_brier = sum((p - y) ** 2 for p, y in selected) / count
         ece += (count / n) * abs(bucket_prediction - bucket_observed)
-        buckets.append(
-            {
-                "lower_bound": lower,
-                "upper_bound": min(upper, 1.0),
-                "samples": count,
-                "mean_prediction": round(bucket_prediction, 4),
-                "observed_completion_rate": round(bucket_observed, 4),
-                "brier_score": round(bucket_brier, 4),
-            }
-        )
+        buckets.append({
+            "lower_bound": lower,
+            "upper_bound": min(upper, 1.0),
+            "samples": count,
+            "mean_prediction": round(bucket_prediction, 4),
+            "observed_completion_rate": round(bucket_observed, 4),
+            "brier_score": round(bucket_brier, 4),
+        })
 
     return {
         "mean_prediction": round(mean_prediction, 4),
@@ -143,51 +132,41 @@ class ExecutionSLACalibrationService:
             forecast_created_at = self._aware(snapshot.created_at)
             deadline_at = self._aware(snapshot.deadline_at)
 
-            outstanding_at_forecast = int(
-                (
-                    await self.session.execute(
-                        select(func.count(ActionJob.id)).where(
-                            ActionJob.campaign_id == snapshot.campaign_id,
-                            ActionJob.owner_id == snapshot.owner_id,
-                            ActionJob.created_at <= forecast_created_at,
-                            or_(
-                                ActionJob.finished_at.is_(None),
-                                ActionJob.finished_at > forecast_created_at,
-                            ),
-                        )
-                    )
-                ).scalar()
-                or 0
-            )
+            # Reconstruct only the queue that already existed at prediction time.
+            # Jobs created after the forecast must never rescue an old prediction.
+            outstanding_at_forecast = int((await self.session.execute(
+                select(func.count(ActionJob.id)).where(
+                    ActionJob.campaign_id == snapshot.campaign_id,
+                    ActionJob.owner_id == snapshot.owner_id,
+                    ActionJob.created_at <= forecast_created_at,
+                    or_(ActionJob.finished_at.is_(None), ActionJob.finished_at > forecast_created_at),
+                )
+            )).scalar() or 0)
             queue_eligible = outstanding_at_forecast >= int(snapshot.remaining_actions)
 
             success_clauses = [
                 ActionJob.campaign_id == snapshot.campaign_id,
                 ActionJob.owner_id == snapshot.owner_id,
+                ActionJob.created_at <= forecast_created_at,
                 ActionJob.status == "success",
                 ActionJob.finished_at.is_not(None),
                 ActionJob.finished_at > forecast_created_at,
                 ActionJob.finished_at <= deadline_at,
             ]
-            actual_successes = int(
-                (await self.session.execute(select(func.count(ActionJob.id)).where(*success_clauses))).scalar()
-                or 0
-            )
-            hard_days = int(
-                (
-                    await self.session.execute(
-                        select(func.count(func.distinct(func.date(ActionJob.started_at)))).where(
-                            ActionJob.campaign_id == snapshot.campaign_id,
-                            ActionJob.owner_id == snapshot.owner_id,
-                            ActionJob.started_at.is_not(None),
-                            ActionJob.started_at > forecast_created_at,
-                            ActionJob.started_at <= deadline_at,
-                            ActionJob.result_code.in_(HARD_COOLDOWN_CODES),
-                        )
-                    )
-                ).scalar()
-                or 0
-            )
+            actual_successes = int((await self.session.execute(
+                select(func.count(ActionJob.id)).where(*success_clauses)
+            )).scalar() or 0)
+            hard_days = int((await self.session.execute(
+                select(func.count(func.distinct(func.date(ActionJob.started_at)))).where(
+                    ActionJob.campaign_id == snapshot.campaign_id,
+                    ActionJob.owner_id == snapshot.owner_id,
+                    ActionJob.created_at <= forecast_created_at,
+                    ActionJob.started_at.is_not(None),
+                    ActionJob.started_at > forecast_created_at,
+                    ActionJob.started_at <= deadline_at,
+                    ActionJob.result_code.in_(HARD_COOLDOWN_CODES),
+                )
+            )).scalar() or 0)
 
             snapshot.queue_eligible_at_forecast = queue_eligible
             snapshot.actual_successful_actions = actual_successes
@@ -209,15 +188,13 @@ class ExecutionSLACalibrationService:
             met = actual_successes >= int(snapshot.remaining_actions)
             completed_at = None
             if met:
-                completed_at = (
-                    await self.session.execute(
-                        select(ActionJob.finished_at)
-                        .where(*success_clauses)
-                        .order_by(ActionJob.finished_at.asc())
-                        .offset(max(int(snapshot.remaining_actions) - 1, 0))
-                        .limit(1)
-                    )
-                ).scalar_one_or_none()
+                completed_at = (await self.session.execute(
+                    select(ActionJob.finished_at)
+                    .where(*success_clauses)
+                    .order_by(ActionJob.finished_at.asc())
+                    .offset(max(int(snapshot.remaining_actions) - 1, 0))
+                    .limit(1)
+                )).scalar_one_or_none()
 
             snapshot.actual_met_sla = met
             snapshot.actual_completed_at = completed_at
@@ -226,6 +203,7 @@ class ExecutionSLACalibrationService:
                 "outstanding_jobs_at_forecast": outstanding_at_forecast,
                 "required_remaining_actions": int(snapshot.remaining_actions),
                 "label_semantics": "fixed_workload_completion_by_deadline",
+                "prediction_time_jobs_only": True,
             }
             labeled += 1
 
@@ -264,7 +242,6 @@ class ExecutionSLACalibrationService:
         ineligible = 0
         pending_mature = 0
         now = datetime.now(timezone.utc)
-
         for row in rows:
             if row.label_status == "ineligible_queue":
                 ineligible += 1
@@ -291,13 +268,13 @@ class ExecutionSLACalibrationService:
             status = "miscalibrated"
 
         warnings = [
-            "Calibration evaluates fixed-workload completion probability for the campaign reserve active at forecast time; it does not label schedule continuity.",
+            "Calibration evaluates fixed-workload completion probability for the reserve active at forecast time; it does not label schedule continuity.",
             "Manual pauses, destination changes or operator intervention are not yet separately modelled and may affect observed completion.",
         ]
         if samples < 20:
-            warnings.append("Fewer than 20 mature eligible forecasts: do not use calibration metrics to tune the model yet.")
+            warnings.append("Fewer than 20 mature eligible forecasts: do not tune the model from calibration metrics yet.")
         if ineligible:
-            warnings.append(f"{ineligible} forecast(s) were excluded because the reconstructed queue was smaller than requested remaining_actions.")
+            warnings.append(f"{ineligible} forecast(s) were excluded because the prediction-time queue was smaller than remaining_actions.")
         if pending_mature:
             warnings.append(f"{pending_mature} mature forecast(s) still need label finalization.")
 
@@ -324,9 +301,7 @@ class ExecutionSLACalibrationService:
         campaign_id: UUID | None = None,
         limit: int = 100,
     ) -> list[SLALabelAuditItem]:
-        stmt = select(ExecutionSLAForecastSnapshot).where(
-            ExecutionSLAForecastSnapshot.owner_id == owner_id
-        )
+        stmt = select(ExecutionSLAForecastSnapshot).where(ExecutionSLAForecastSnapshot.owner_id == owner_id)
         if campaign_id is not None:
             stmt = stmt.where(ExecutionSLAForecastSnapshot.campaign_id == campaign_id)
         result = await self.session.execute(
