@@ -18,6 +18,12 @@ class InviteSettings(BaseModel):
         le=100,
         description="Максимальное количество инвайтов в день на один аккаунт"
     )
+    reserve_capacity_percentage: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=50.0,
+        description="Доля безопасной account-capacity, оставляемая свободной для failover"
+    )
     invite_delay_min: int = Field(
         default=45,
         ge=10,
@@ -97,113 +103,35 @@ class InviteSettings(BaseModel):
 
 
 class InviteCampaignCreate(BaseModel):
-    """
-    Схема для создания новой кампании инвайтинга.
-    """
     model_config = ConfigDict(from_attributes=True)
 
-    title: str = Field(
-        ...,
-        min_length=1,
-        max_length=160,
-        description="Название кампании"
-    )
-    target_chat_id: int = Field(
-        ...,
-        description="ID целевого чата/канала, куда приглашать пользователей"
-    )
-    target_chat_title: Optional[str] = Field(
-        default=None,
-        max_length=255,
-        description="Название целевого чата/канала (опционально)"
-    )
-    target_chat_username: Optional[str] = Field(
-        default=None,
-        max_length=255,
-        description="Username целевого чата/канала (опционально)"
-    )
-    source_chat_id: Optional[int] = Field(
-        default=None,
-        description="ID исходного чата/канала, откуда брать пользователей (опционально)"
-    )
-    source_chat_title: Optional[str] = Field(
-        default=None,
-        max_length=255,
-        description="Название исходного чата/канала (опционально)"
-    )
-    source_type: Literal["chat", "parsed_list", "uploaded_list"] = Field(
-        default="chat",
-        description="Тип источника пользователей"
-    )
-    notes: Optional[str] = Field(
-        default=None,
-        description="Заметки к кампании"
-    )
-    settings: InviteSettings = Field(
-        default_factory=InviteSettings,
-        description="Настройки безопасности и поведения кампании"
-    )
+    title: str = Field(..., min_length=1, max_length=160, description="Название кампании")
+    target_chat_id: int = Field(..., description="ID целевого чата/канала, куда приглашать пользователей")
+    target_chat_title: Optional[str] = Field(default=None, max_length=255)
+    target_chat_username: Optional[str] = Field(default=None, max_length=255)
+    source_chat_id: Optional[int] = None
+    source_chat_title: Optional[str] = Field(default=None, max_length=255)
+    source_type: Literal["chat", "parsed_list", "uploaded_list"] = "chat"
+    notes: Optional[str] = None
+    settings: InviteSettings = Field(default_factory=InviteSettings)
 
 
 class InviteCampaignUpdate(BaseModel):
-    """
-    Схема для обновления существующей кампании.
-    Все поля опциональны.
-    """
     model_config = ConfigDict(from_attributes=True)
 
-    title: Optional[str] = Field(
-        default=None,
-        min_length=1,
-        max_length=160,
-        description="Название кампании"
-    )
-    target_chat_id: Optional[int] = Field(
-        default=None,
-        description="ID целевого чата/канала"
-    )
-    target_chat_title: Optional[str] = Field(
-        default=None,
-        max_length=255,
-        description="Название целевого чата/канала"
-    )
-    target_chat_username: Optional[str] = Field(
-        default=None,
-        max_length=255,
-        description="Username целевого чата/канала"
-    )
-    source_chat_id: Optional[int] = Field(
-        default=None,
-        description="ID исходного чата/канала"
-    )
-    source_chat_title: Optional[str] = Field(
-        default=None,
-        max_length=255,
-        description="Название исходного чата/канала"
-    )
-    source_type: Optional[Literal["chat", "parsed_list", "uploaded_list"]] = Field(
-        default=None,
-        description="Тип источника пользователей"
-    )
-    notes: Optional[str] = Field(
-        default=None,
-        description="Заметки к кампании"
-    )
-    status: Optional[Literal["draft", "active", "paused", "completed", "failed"]] = Field(
-        default=None,
-        description="Статус кампании"
-    )
-    settings: Optional[InviteSettings] = Field(
-        default=None,
-        description="Настройки безопасности и поведения кампании"
-    )
+    title: Optional[str] = Field(default=None, min_length=1, max_length=160)
+    target_chat_id: Optional[int] = None
+    target_chat_title: Optional[str] = Field(default=None, max_length=255)
+    target_chat_username: Optional[str] = Field(default=None, max_length=255)
+    source_chat_id: Optional[int] = None
+    source_chat_title: Optional[str] = Field(default=None, max_length=255)
+    source_type: Optional[Literal["chat", "parsed_list", "uploaded_list"]] = None
+    notes: Optional[str] = None
+    status: Optional[Literal["draft", "active", "paused", "completed", "failed"]] = None
+    settings: Optional[InviteSettings] = None
 
 
 class InviteCampaignResponse(BaseModel):
-    """
-    Полная схема кампании для возврата клиенту.
-    Включает вычисляемые поля и связанные данные.
-    """
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
@@ -217,6 +145,7 @@ class InviteCampaignResponse(BaseModel):
     target_chat_title: Optional[str]
     target_chat_username: Optional[str]
     daily_limit_per_account: int
+    reserve_capacity_percentage: float
     invite_delay_min: int
     invite_delay_max: int
     pause_after_every: int
@@ -232,36 +161,14 @@ class InviteCampaignResponse(BaseModel):
     notes: Optional[str]
     created_at: datetime
     updated_at: datetime
-
-    # Вычисляемые поля (будет заполняться в сервисе)
-    tasks_count: Optional[int] = Field(
-        default=None,
-        description="Общее количество задач в кампании"
-    )
-    completed_tasks_count: Optional[int] = Field(
-        default=None,
-        description="Количество успешно выполненных задач"
-    )
-    failed_tasks_count: Optional[int] = Field(
-        default=None,
-        description="Количество задач с ошибкой"
-    )
-    floodwait_tasks_count: Optional[int] = Field(
-        default=None,
-        description="Количество задач, ожидающих из-за FloodWait"
-    )
-    success_rate: Optional[float] = Field(
-        default=None,
-        ge=0.0,
-        le=100.0,
-        description="Процент успешных задач (0-100)"
-    )
+    tasks_count: Optional[int] = None
+    completed_tasks_count: Optional[int] = None
+    failed_tasks_count: Optional[int] = None
+    floodwait_tasks_count: Optional[int] = None
+    success_rate: Optional[float] = Field(default=None, ge=0.0, le=100.0)
 
 
 class InviteCampaignList(BaseModel):
-    """
-    Укороченная схема кампании для списков.
-    """
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
@@ -277,10 +184,6 @@ class InviteCampaignList(BaseModel):
 
 
 class InviteTaskCreate(BaseModel):
-    """
-    Внутренняя схема для создания задачи инвайтинга.
-    Используется сервисом и задачами Celery.
-    """
     model_config = ConfigDict(from_attributes=True)
 
     campaign_id: UUID
@@ -291,9 +194,6 @@ class InviteTaskCreate(BaseModel):
 
 
 class InviteTaskResponse(BaseModel):
-    """
-    Схема для возврата данных задачи инвайтинга.
-    """
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
@@ -314,9 +214,6 @@ class InviteTaskResponse(BaseModel):
 
 
 class InviteLogResponse(BaseModel):
-    """
-    Схема для возврата записи лога инвайтинга.
-    """
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
@@ -329,9 +226,6 @@ class InviteLogResponse(BaseModel):
 
 
 class CampaignStats(BaseModel):
-    """
-    Статистика кампании.
-    """
     model_config = ConfigDict(from_attributes=True)
 
     campaign_id: UUID
@@ -349,9 +243,6 @@ class CampaignStats(BaseModel):
 
 
 class InviteCampaignFilter(BaseModel):
-    """
-    Фильтры для получения списка кампаний.
-    """
     model_config = ConfigDict(from_attributes=True)
 
     status: Optional[Literal["draft", "active", "paused", "completed", "failed"]] = None
@@ -359,27 +250,12 @@ class InviteCampaignFilter(BaseModel):
     created_after: Optional[datetime] = None
     created_before: Optional[datetime] = None
     target_chat_id: Optional[int] = None
-    search: Optional[str] = Field(
-        default=None,
-        description="Поиск по названию кампании"
-    )
+    search: Optional[str] = None
 
 
 class StartCampaignRequest(BaseModel):
-    """
-    Запрос на запуск кампании.
-    Позволяет переопределить настройки при запуске.
-    """
     model_config = ConfigDict(from_attributes=True)
 
     campaign_id: UUID
-    override_settings: Optional[InviteSettings] = Field(
-        default=None,
-        description="Переопределить настройки кампании при запуске"
-    )
-    max_parallel_tasks: Optional[int] = Field(
-        default=None,
-        ge=1,
-        le=50,
-        description="Максимальное количество параллельных задач (если не указано - берется из настроек кампании)"
-    )
+    override_settings: Optional[InviteSettings] = None
+    max_parallel_tasks: Optional[int] = Field(default=None, ge=1, le=50)
