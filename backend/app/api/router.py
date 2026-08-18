@@ -25,6 +25,7 @@ from app.features.learning.api import router as learning_router
 from app.features.learning.webhook_api import router as outcome_webhook_router
 from app.features.orchestration.adaptive_api import router as adaptive_execution_router
 from app.features.orchestration.resilience_api import router as execution_resilience_router
+from app.features.orchestration.sla_api import router as execution_sla_router
 from app.features.orchestration.api import router as orchestration_router
 from app.features.orchestration.campaign_api import router as campaign_create_router
 from app.features.parser.api import router as parser_router
@@ -37,22 +38,10 @@ from app.features.segments.forecast_api import router as segment_forecast_router
 from app.features.segments.api import router as segments_router
 
 api_router = APIRouter()
-api_router.include_router(
-    fastapi_users.get_auth_router(auth_backend),
-    prefix="/auth/jwt",
-    tags=["auth"],
-)
+api_router.include_router(fastapi_users.get_auth_router(auth_backend), prefix="/auth/jwt", tags=["auth"])
 if settings.allow_registration:
-    api_router.include_router(
-        fastapi_users.get_register_router(UserRead, UserCreate),
-        prefix="/auth",
-        tags=["auth"],
-    )
-api_router.include_router(
-    fastapi_users.get_users_router(UserRead, UserUpdate),
-    prefix="/users",
-    tags=["users"],
-)
+    api_router.include_router(fastapi_users.get_register_router(UserRead, UserCreate), prefix="/auth", tags=["auth"])
+api_router.include_router(fastapi_users.get_users_router(UserRead, UserUpdate), prefix="/users", tags=["users"])
 api_router.include_router(health_router, prefix="/health", tags=["health"])
 api_router.include_router(accounts_router, tags=["accounts"])
 api_router.include_router(account_capacity_router, tags=["account-capacity", "risk"])
@@ -84,6 +73,7 @@ api_router.include_router(allocation_frontier_router, tags=["allocations", "capa
 api_router.include_router(allocations_router, tags=["allocations"])
 api_router.include_router(learning_router, tags=["learning"])
 api_router.include_router(outcome_webhook_router, tags=["learning", "outcome-webhooks"])
+api_router.include_router(execution_sla_router, tags=["execution-sla", "adaptive-execution"])
 api_router.include_router(execution_resilience_router, tags=["adaptive-execution", "resilience"])
 api_router.include_router(adaptive_execution_router, tags=["adaptive-execution", "orchestration"])
 api_router.include_router(campaign_create_router, tags=["orchestration"])

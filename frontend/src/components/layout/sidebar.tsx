@@ -23,6 +23,7 @@ import {
   Gauge,
   Activity,
   ArrowRightLeft,
+  TimerReset,
 } from "lucide-react";
 
 const navItems = [
@@ -48,6 +49,7 @@ const navItems = [
   { to: "/connections", icon: Cable, label: "Connections" },
   { to: "/account-capacity", icon: ShieldCheck, label: "Account Capacity" },
   { to: "/adaptive-execution", icon: ArrowRightLeft, label: "Adaptive Execution" },
+  { to: "/execution-sla", icon: TimerReset, label: "Execution SLA" },
   { to: "/accounts", icon: Users, label: "Telegram Accounts" },
   { to: "/proxies", icon: Shield, label: "Proxies" },
   { to: "/settings", icon: Settings, label: "Settings" },

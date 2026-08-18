@@ -6,6 +6,7 @@ import DashboardPage from "@/pages/dashboard";
 import AccountsPage from "@/pages/accounts";
 import AccountCapacityPage from "@/pages/account-capacity";
 import AdaptiveExecutionPage from "@/pages/adaptive-execution";
+import ExecutionSLAPage from "@/pages/execution-sla";
 import ConnectionsPage from "@/pages/connections";
 import ProxiesPage from "@/pages/proxies";
 import ParserPage from "@/pages/parser";
@@ -56,6 +57,7 @@ export default function App() {
             <Route path="accounts" element={<AccountsPage />} />
             <Route path="account-capacity" element={<AccountCapacityPage />} />
             <Route path="adaptive-execution" element={<AdaptiveExecutionPage />} />
+            <Route path="execution-sla" element={<ExecutionSLAPage />} />
             <Route path="proxies" element={<ProxiesPage />} />
             <Route path="parser" element={<ParserPage />} />
             <Route path="audience" element={<AudiencePage />} />
