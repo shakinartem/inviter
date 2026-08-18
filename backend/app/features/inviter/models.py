@@ -43,6 +43,9 @@ class InviteCampaign(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     daily_limit_per_account: Mapped[int] = mapped_column(
         Integer, default=30, nullable=False
     )
+    reserve_capacity_percentage: Mapped[float] = mapped_column(
+        Float, default=0.0, nullable=False
+    )
     invite_delay_min: Mapped[int] = mapped_column(
         Integer, default=45, nullable=False
     )  # seconds
