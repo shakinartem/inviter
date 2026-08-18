@@ -5,7 +5,6 @@ import math
 import random
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Any
 from uuid import UUID
 
 from sqlalchemy import case, func, select
@@ -48,8 +47,6 @@ def wilson_upper(*, successes: float, total: float, z: float = 1.96) -> float:
 
 
 def conservative_daily_hazard(*, hard_failure_days: int, exposure_days: int) -> float:
-    # Wilson upper bound over the same weak Beta prior pseudo-observations. This
-    # deliberately overstates risk when the history is sparse.
     successes = PRIOR_ALPHA + max(int(hard_failure_days), 0)
     total = PRIOR_ALPHA + PRIOR_BETA + max(int(exposure_days), 0)
     return min(wilson_upper(successes=successes, total=total), 0.95)
@@ -94,8 +91,14 @@ def simulate_sla_scenarios(
     deadline_days: int,
     simulations: int,
     seed: int,
-) -> dict[float, tuple[float, float]]:
-    """Return reserve -> (completion probability, expected actions by deadline)."""
+) -> dict[float, tuple[float, float, float]]:
+    """Return reserve -> (schedule continuity, workload completion, expected actions).
+
+    Schedule continuity means physical surviving capacity stayed at or above the
+    normal committed throughput on every day in the horizon. Reserve can improve
+    this metric because it lowers the promised normal rate without increasing the
+    platform's physical emergency ceiling.
+    """
     if len(emergency_capacities) != len(hazards):
         raise ValueError("capacity and hazard vectors must have equal length")
     reserves = [min(max(float(item), 0.0), 50.0) for item in reserve_percentages]
@@ -103,30 +106,37 @@ def simulate_sla_scenarios(
         reserve: sum(normal_capacity(capacity, reserve) for capacity in emergency_capacities)
         for reserve in reserves
     }
+    continuities = {reserve: 0 for reserve in reserves}
     completions = {reserve: 0 for reserve in reserves}
     action_totals = {reserve: 0.0 for reserve in reserves}
     if not emergency_capacities or simulations <= 0:
-        return {reserve: (0.0, 0.0) for reserve in reserves}
+        return {reserve: (0.0, 0.0, 0.0) for reserve in reserves}
 
     rng = random.Random(seed)
     for _ in range(simulations):
         cumulative = {reserve: 0 for reserve in reserves}
+        continuous = {reserve: True for reserve in reserves}
         for _day in range(deadline_days):
             surviving_emergency = 0
             for capacity, hazard in zip(emergency_capacities, hazards):
                 if rng.random() >= min(max(float(hazard), 0.0), 1.0):
                     surviving_emergency += capacity
             for reserve in reserves:
-                delivered = min(normal_totals[reserve], surviving_emergency)
-                cumulative[reserve] += delivered
+                normal_total = normal_totals[reserve]
+                if surviving_emergency < normal_total:
+                    continuous[reserve] = False
+                cumulative[reserve] += min(normal_total, surviving_emergency)
         for reserve in reserves:
             total = cumulative[reserve]
             action_totals[reserve] += total
+            if continuous[reserve]:
+                continuities[reserve] += 1
             if total >= remaining_actions:
                 completions[reserve] += 1
 
     return {
         reserve: (
+            continuities[reserve] / simulations,
             completions[reserve] / simulations,
             action_totals[reserve] / simulations,
         )
@@ -194,7 +204,6 @@ class ExecutionSLAForecastService:
             )
         )
         accounts = list(account_result.scalars().all())
-
         exposure = await self._historical_exposure(
             account_ids=[account.id for account in accounts],
             lookback_days=lookback_days,
@@ -214,14 +223,8 @@ class ExecutionSLAForecastService:
             metrics = exposure.get(account.id, {"exposure_days": 0, "hard_failure_days": 0})
             exposure_days = int(metrics["exposure_days"])
             hard_days = int(metrics["hard_failure_days"])
-            posterior = posterior_daily_hazard(
-                hard_failure_days=hard_days,
-                exposure_days=exposure_days,
-            )
-            conservative = conservative_daily_hazard(
-                hard_failure_days=hard_days,
-                exposure_days=exposure_days,
-            )
+            posterior = posterior_daily_hazard(hard_failure_days=hard_days, exposure_days=exposure_days)
+            conservative = conservative_daily_hazard(hard_failure_days=hard_days, exposure_days=exposure_days)
             account_rows.append(
                 AccountHazardResponse(
                     account_id=account.id,
@@ -241,15 +244,9 @@ class ExecutionSLAForecastService:
             exposure_days_vector.append(exposure_days)
 
         current_reserve = min(max(float(campaign.reserve_capacity_percentage or 0.0), 0.0), 50.0)
-        scenario_reserves = sorted(
-            {
-                *DEFAULT_RESERVES,
-                current_reserve,
-                *(reserve_percentages or []),
-            }
-        )
-        # Bound CPU by keeping one shared random path per hazard vector and scaling
-        # simulation count to pool/horizon size when necessary.
+        scenario_reserves = sorted({*DEFAULT_RESERVES, current_reserve, *(reserve_percentages or [])})
+        required_daily_rate = math.ceil(remaining_actions / deadline_days)
+
         requested_simulations = max(int(simulations), 500)
         complexity_per_simulation = max(deadline_days * (len(accounts) + len(scenario_reserves)), 1)
         effective_simulations = min(requested_simulations, max(500, 3_000_000 // complexity_per_simulation))
@@ -283,20 +280,25 @@ class ExecutionSLAForecastService:
         scenarios: list[SLAScenarioResponse] = []
         for reserve in scenario_reserves:
             normal_total = sum(normal_capacity(item, reserve) for item in emergency_capacities)
-            model_probability, expected_actions = modelled[reserve]
-            conservative_probability, conservative_actions = conservative[reserve]
+            model_continuity, model_completion, expected_actions = modelled[reserve]
+            conservative_continuity, conservative_completion, conservative_actions = conservative[reserve]
+            supports_required_rate = normal_total >= required_daily_rate
             scenarios.append(
                 SLAScenarioResponse(
                     reserve_percentage=reserve,
                     normal_daily_capacity=normal_total,
                     emergency_daily_capacity=emergency_total,
                     reserved_headroom=max(emergency_total - normal_total, 0),
+                    required_daily_rate=required_daily_rate,
+                    supports_required_daily_rate=supports_required_rate,
                     nominal_completion_days=(round(remaining_actions / normal_total, 2) if normal_total > 0 else None),
-                    modelled_completion_probability=round(model_probability, 4),
-                    conservative_completion_probability=round(conservative_probability, 4),
+                    modelled_schedule_continuity_probability=round(model_continuity, 4),
+                    conservative_schedule_continuity_probability=round(conservative_continuity, 4),
+                    modelled_workload_completion_probability=round(model_completion, 4),
+                    conservative_workload_completion_probability=round(conservative_completion, 4),
                     expected_actions_by_deadline=round(expected_actions, 1),
                     conservative_expected_actions_by_deadline=round(conservative_actions, 1),
-                    meets_target_sla=conservative_probability >= target_sla,
+                    meets_target_sla=(supports_required_rate and conservative_continuity >= target_sla),
                     throughput_penalty_vs_zero_reserve=max(zero_capacity - normal_total, 0),
                 )
             )
@@ -313,25 +315,27 @@ class ExecutionSLAForecastService:
         total_exposure = sum(exposure_days_vector)
         total_hard = sum(item.hard_failure_days for item in account_rows)
         warnings = [
-            "Execution SLA is a modelled operational probability, not a platform guarantee.",
-            "Daily account disruptions are treated as independent; correlated Telegram/platform incidents can make reality worse.",
+            "Execution SLA is a modelled operational probability, not a Telegram/platform guarantee.",
+            "Reserve improves schedule continuity by lowering committed normal throughput; it does not create physical emergency capacity.",
+            "Daily account disruptions are treated as independent; correlated platform incidents can make reality worse.",
             "Historical exposure counts active execution days, so sparse/new accounts are intentionally pulled toward a conservative prior.",
         ]
         if len(eligible) < len(pool_ids):
             warnings.append("Some accounts from the campaign pool are currently quarantined/unavailable and excluded from usable capacity.")
         if quality == "limited":
-            warnings.append("Historical account exposure is limited; use this forecast for stress planning, not an SLA commitment.")
+            warnings.append("Historical account exposure is limited; use this forecast for stress planning, not a contractual SLA.")
         if effective_simulations < requested_simulations:
-            warnings.append(
-                f"Simulation count was capped at {effective_simulations} to bound request cost for this pool/horizon."
-            )
+            warnings.append(f"Simulation count was capped at {effective_simulations} to bound request cost for this pool/horizon.")
 
-        if recommended is None:
-            status = "target_sla_not_supported"
+        any_supports_rate = any(item.supports_required_daily_rate for item in scenarios)
+        if not any_supports_rate:
+            status = "workload_exceeds_normal_capacity"
+        elif recommended is None:
+            status = "continuity_sla_not_supported"
         elif quality == "limited":
-            status = "target_sla_modelled_but_evidence_limited"
+            status = "continuity_sla_modelled_but_evidence_limited"
         else:
-            status = "target_sla_supported"
+            status = "continuity_sla_supported"
 
         deadline_at = now + timedelta(days=deadline_days)
         forecast_id: UUID | None = None
@@ -347,16 +351,18 @@ class ExecutionSLAForecastService:
                 evidence_quality=quality,
                 current_reserve_percentage=current_reserve,
                 recommended_reserve_percentage=(recommended.reserve_percentage if recommended else None),
-                recommended_modelled_probability=(recommended.modelled_completion_probability if recommended else None),
-                recommended_conservative_probability=(recommended.conservative_completion_probability if recommended else None),
+                recommended_modelled_continuity_probability=(recommended.modelled_schedule_continuity_probability if recommended else None),
+                recommended_conservative_continuity_probability=(recommended.conservative_schedule_continuity_probability if recommended else None),
                 normal_daily_capacity=current_scenario.normal_daily_capacity,
                 emergency_daily_capacity=current_scenario.emergency_daily_capacity,
                 input_snapshot={
                     "pool_account_ids": [str(item.account_id) for item in account_rows],
+                    "required_daily_rate": required_daily_rate,
                     "total_exposure_days": total_exposure,
                     "total_hard_failure_days": total_hard,
                     "accounts": [item.model_dump(mode="json") for item in account_rows],
                     "simulations": effective_simulations,
+                    "objective": "schedule_continuity_subject_to_workload_rate",
                 },
                 scenarios_snapshot=[item.model_dump(mode="json") for item in scenarios],
             )
@@ -372,6 +378,7 @@ class ExecutionSLAForecastService:
             campaign_title=campaign.title,
             remaining_actions=remaining_actions,
             deadline_days=deadline_days,
+            required_daily_rate=required_daily_rate,
             deadline_at=deadline_at,
             target_sla=target_sla,
             lookback_days=lookback_days,
@@ -395,9 +402,7 @@ class ExecutionSLAForecastService:
         campaign_id: UUID | None = None,
         limit: int = 100,
     ) -> list[ExecutionSLAForecastHistoryItem]:
-        stmt = select(ExecutionSLAForecastSnapshot).where(
-            ExecutionSLAForecastSnapshot.owner_id == owner_id
-        )
+        stmt = select(ExecutionSLAForecastSnapshot).where(ExecutionSLAForecastSnapshot.owner_id == owner_id)
         if campaign_id is not None:
             stmt = stmt.where(ExecutionSLAForecastSnapshot.campaign_id == campaign_id)
         result = await self.session.execute(
@@ -414,7 +419,7 @@ class ExecutionSLAForecastService:
                 evidence_quality=item.evidence_quality,
                 current_reserve_percentage=item.current_reserve_percentage,
                 recommended_reserve_percentage=item.recommended_reserve_percentage,
-                recommended_conservative_probability=item.recommended_conservative_probability,
+                recommended_conservative_continuity_probability=item.recommended_conservative_continuity_probability,
                 normal_daily_capacity=item.normal_daily_capacity,
                 emergency_daily_capacity=item.emergency_daily_capacity,
                 actual_completed_at=item.actual_completed_at,
@@ -432,10 +437,7 @@ class ExecutionSLAForecastService:
         now: datetime,
     ) -> dict[UUID, dict[str, int]]:
         cutoff = now - timedelta(days=lookback_days)
-        hard_case = case(
-            (ActionJob.result_code.in_(HARD_COOLDOWN_CODES), 1),
-            else_=0,
-        )
+        hard_case = case((ActionJob.result_code.in_(HARD_COOLDOWN_CODES), 1), else_=0)
         result = await self.session.execute(
             select(
                 ActionJob.account_id,
@@ -449,9 +451,7 @@ class ExecutionSLAForecastService:
             )
             .group_by(ActionJob.account_id, func.date(ActionJob.started_at))
         )
-        metrics: dict[UUID, dict[str, int]] = defaultdict(
-            lambda: {"exposure_days": 0, "hard_failure_days": 0}
-        )
+        metrics: dict[UUID, dict[str, int]] = defaultdict(lambda: {"exposure_days": 0, "hard_failure_days": 0})
         for account_id, _execution_day, hard_failure in result.all():
             metrics[account_id]["exposure_days"] += 1
             metrics[account_id]["hard_failure_days"] += int(hard_failure or 0)
