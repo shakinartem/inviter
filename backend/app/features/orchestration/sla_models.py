@@ -30,8 +30,8 @@ class ExecutionSLAForecastSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     current_reserve_percentage: Mapped[float] = mapped_column(Float, nullable=False)
     recommended_reserve_percentage: Mapped[float | None] = mapped_column(Float, nullable=True)
-    recommended_modelled_probability: Mapped[float | None] = mapped_column(Float, nullable=True)
-    recommended_conservative_probability: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recommended_modelled_continuity_probability: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recommended_conservative_continuity_probability: Mapped[float | None] = mapped_column(Float, nullable=True)
     normal_daily_capacity: Mapped[int] = mapped_column(Integer, nullable=False)
     emergency_daily_capacity: Mapped[int] = mapped_column(Integer, nullable=False)
 
