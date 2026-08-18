@@ -12,6 +12,7 @@ from app.features.learning.webhook_models import OutcomeWebhookSource
 from app.features.experiments.models import CampaignExperiment, ExperimentAssignment
 from app.features.orchestration.destinations import CampaignDestination
 from app.features.orchestration.models import ActionJob
+from app.features.orchestration.adaptive_models import ActionAssignmentEvent
 from app.features.segments.models import (
     AudienceSegment,
     AudienceSegmentMember,
@@ -41,6 +42,7 @@ __all__ = (
     "ExperimentAssignment",
     "CampaignDestination",
     "ActionJob",
+    "ActionAssignmentEvent",
     "AudienceSegment",
     "AudienceSegmentMember",
     "CampaignAudienceSource",
