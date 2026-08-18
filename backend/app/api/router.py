@@ -23,6 +23,7 @@ from app.features.intelligence.api import router as intelligence_router
 from app.features.intelligence.intent_api import router as intent_router
 from app.features.learning.api import router as learning_router
 from app.features.learning.webhook_api import router as outcome_webhook_router
+from app.features.orchestration.adaptive_api import router as adaptive_execution_router
 from app.features.orchestration.api import router as orchestration_router
 from app.features.orchestration.campaign_api import router as campaign_create_router
 from app.features.parser.api import router as parser_router
@@ -82,6 +83,7 @@ api_router.include_router(allocation_frontier_router, tags=["allocations", "capa
 api_router.include_router(allocations_router, tags=["allocations"])
 api_router.include_router(learning_router, tags=["learning"])
 api_router.include_router(outcome_webhook_router, tags=["learning", "outcome-webhooks"])
+api_router.include_router(adaptive_execution_router, tags=["adaptive-execution", "orchestration"])
 api_router.include_router(campaign_create_router, tags=["orchestration"])
 api_router.include_router(orchestration_router, tags=["orchestration"])
 api_router.include_router(proxies_router, tags=["proxies"])

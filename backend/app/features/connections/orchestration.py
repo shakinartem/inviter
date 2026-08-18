@@ -6,13 +6,14 @@ from uuid import UUID
 
 from sqlalchemy import or_, select
 
-from app.features.accounts.capacity import AccountCapacityRiskService
+from app.features.accounts.capacity import HARD_COOLDOWN_CODES, AccountCapacityRiskService
 from app.features.accounts.models import Account
 from app.features.experiments.service import CampaignExperimentService
 from app.features.intelligence.models import AudienceMember
 from app.features.inviter.models import InviteCampaign
 from app.features.learning.frozen_snapshot import FrozenDecisionSnapshotService
 from app.features.learning.service import OutcomeLearningService
+from app.features.orchestration.adaptive import AdaptiveExecutionService
 from app.features.orchestration.destinations import CampaignDestinationService
 from app.features.orchestration.models import ActionJob
 from app.features.orchestration.service import OrchestrationService
@@ -205,7 +206,7 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
             await learning.ensure_action_snapshot(job.id)
 
         result = await super().execute_job(job_id)
-        code = str(result.get("code") or "")
+        code = str(result.get("code") or "").upper()
 
         if job is not None and not code.startswith("ALREADY_"):
             account_result = await self.session.execute(
@@ -218,6 +219,21 @@ class ConnectionAwareOrchestrationService(OrchestrationService):
                 retry_after = None
                 if next_attempt is not None:
                     retry_after = max(int((self._aware(next_attempt) - now).total_seconds()), 1)
+
+                # Move only untouched future jobs before the risk controller shifts
+                # anything that must remain pinned beyond the cooldown.
+                if code in HARD_COOLDOWN_CODES:
+                    adaptive = await AdaptiveExecutionService(self.session).rebalance_account(
+                        owner_id=job.owner_id,
+                        source_account_id=account.id,
+                        campaign_id=job.campaign_id,
+                        reason=f"automatic_{code.lower()}",
+                        max_jobs=500,
+                    )
+                    result["adaptive_rebalanced_jobs"] = adaptive.moved_jobs
+                    result["adaptive_unmoved_jobs"] = adaptive.no_safe_target_jobs
+                    result["adaptive_pinned_jobs"] = adaptive.untouched_started_or_retry_jobs
+
                 await AccountCapacityRiskService(self.session).apply_action_outcome(
                     account=account,
                     outcome={

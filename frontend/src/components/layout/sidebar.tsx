@@ -22,6 +22,7 @@ import {
   BadgeDollarSign,
   Gauge,
   Activity,
+  ArrowRightLeft,
 } from "lucide-react";
 
 const navItems = [
@@ -46,6 +47,7 @@ const navItems = [
   { to: "/outcome-sources", icon: Webhook, label: "Outcome Sources" },
   { to: "/connections", icon: Cable, label: "Connections" },
   { to: "/account-capacity", icon: ShieldCheck, label: "Account Capacity" },
+  { to: "/adaptive-execution", icon: ArrowRightLeft, label: "Adaptive Execution" },
   { to: "/accounts", icon: Users, label: "Telegram Accounts" },
   { to: "/proxies", icon: Shield, label: "Proxies" },
   { to: "/settings", icon: Settings, label: "Settings" },
