@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from math import ceil
 from uuid import UUID
 
@@ -15,6 +16,57 @@ from app.features.orchestration.resilience_schemas import (
     ResilienceAccountResponse,
 )
 from app.features.orchestration.service import OrchestrationService
+
+
+@dataclass(frozen=True, slots=True)
+class ResilienceSummary:
+    normal_capacities: tuple[int, ...]
+    normal_daily_capacity: int
+    emergency_daily_capacity: int
+    reserved_failover_headroom: int
+    worst_single_account_loss_capacity: int
+    n_minus_one_surviving_capacity: int
+    n_minus_one_margin: int
+    n_minus_one_covered: bool
+    resilience_ratio: float
+    recommended_min_reserve_percentage: float | None
+
+
+def summarize_resilience_capacities(
+    emergency_capacities: list[int] | tuple[int, ...],
+    reserve_percentage: float,
+) -> ResilienceSummary:
+    """Pure N-1 capacity calculation used by API and regression tests."""
+    reserve = min(max(float(reserve_percentage), 0.0), 50.0)
+    emergency = tuple(max(int(value), 0) for value in emergency_capacities if int(value) > 0)
+    normal = tuple(
+        min(max(int(value * (1.0 - reserve / 100.0)), 1), value)
+        for value in emergency
+    )
+    emergency_total = sum(emergency)
+    normal_total = sum(normal)
+    max_account = max(emergency, default=0)
+    surviving = max(emergency_total - max_account, 0)
+    margin = surviving - normal_total
+    covered = len(emergency) >= 2 and normal_total > 0 and margin >= 0
+    ratio = round(surviving / normal_total, 3) if normal_total > 0 else 0.0
+
+    recommended: float | None = None
+    if emergency_total > 0 and len(emergency) >= 2:
+        recommended = min(float(ceil(100.0 * max_account / emergency_total)), 50.0)
+
+    return ResilienceSummary(
+        normal_capacities=normal,
+        normal_daily_capacity=normal_total,
+        emergency_daily_capacity=emergency_total,
+        reserved_failover_headroom=max(emergency_total - normal_total, 0),
+        worst_single_account_loss_capacity=max_account,
+        n_minus_one_surviving_capacity=surviving,
+        n_minus_one_margin=margin,
+        n_minus_one_covered=covered,
+        resilience_ratio=ratio,
+        recommended_min_reserve_percentage=recommended,
+    )
 
 
 class CampaignResilienceService:
@@ -92,38 +144,31 @@ class CampaignResilienceService:
         accounts = list(accounts_result.scalars().all())
         reserve_percentage = min(max(float(campaign.reserve_capacity_percentage or 0.0), 0.0), 50.0)
 
-        items: list[ResilienceAccountResponse] = []
+        emergency_by_account: list[tuple[Account, int, float]] = []
         for account in accounts:
             assessment = assessment_by_id[account.id]
             warmup_limit = OrchestrationService._effective_daily_limit(account, campaign, assessment.calculated_at)
             emergency = max(min(int(assessment.suggested_daily_capacity), int(warmup_limit)), 1)
-            normal = max(int(emergency * (1.0 - reserve_percentage / 100.0)), 1)
-            normal = min(normal, emergency)
-            items.append(
-                ResilienceAccountResponse(
-                    account_id=account.id,
-                    label=account.label,
-                    health_score=float(assessment.health_score),
-                    emergency_daily_capacity=emergency,
-                    normal_daily_capacity=normal,
-                    reserved_headroom=max(emergency - normal, 0),
-                )
+            emergency_by_account.append((account, emergency, float(assessment.health_score)))
+
+        summary = summarize_resilience_capacities(
+            [capacity for _, capacity, _ in emergency_by_account],
+            reserve_percentage,
+        )
+        items = [
+            ResilienceAccountResponse(
+                account_id=account.id,
+                label=account.label,
+                health_score=health,
+                emergency_daily_capacity=emergency,
+                normal_daily_capacity=normal,
+                reserved_headroom=max(emergency - normal, 0),
             )
-
-        emergency_total = sum(item.emergency_daily_capacity for item in items)
-        normal_total = sum(item.normal_daily_capacity for item in items)
-        max_account = max((item.emergency_daily_capacity for item in items), default=0)
-        surviving = max(emergency_total - max_account, 0)
-        margin = surviving - normal_total
-        covered = bool(items) and len(items) >= 2 and margin >= 0
-        ratio = round(surviving / normal_total, 3) if normal_total > 0 else 0.0
-
-        recommended: float | None = None
-        if emergency_total > 0 and len(items) >= 2:
-            # Approximate reserve required for total normal load to fit inside the
-            # surviving emergency capacity after losing the largest account.
-            raw = 100.0 * max_account / emergency_total
-            recommended = min(float(ceil(raw)), 50.0)
+            for (account, emergency, health), normal in zip(
+                emergency_by_account,
+                summary.normal_capacities,
+            )
+        ]
 
         warnings: list[str] = []
         if len(items) < 2:
@@ -132,14 +177,14 @@ class CampaignResilienceService:
             warnings.append("Some accounts in the original campaign pool are currently quarantined or unavailable.")
         if reserve_percentage <= 0:
             warnings.append("No explicit failover reserve is configured; normal planning may consume all safe capacity.")
-        if recommended is not None and recommended >= 50.0 and not covered:
+        if summary.recommended_min_reserve_percentage is not None and summary.recommended_min_reserve_percentage >= 50.0 and not summary.n_minus_one_covered:
             warnings.append("The current pool is too concentrated for practical N-1 coverage under the 50% reserve ceiling.")
-        if not covered and len(items) >= 2:
+        if not summary.n_minus_one_covered and len(items) >= 2:
             warnings.append("Losing the highest-capacity account would reduce surviving safe capacity below current normal throughput.")
 
         if not items:
             status = "no_safe_capacity"
-        elif covered:
+        elif summary.n_minus_one_covered:
             status = "n_minus_one_ready"
         elif len(items) < 2:
             status = "single_point_of_failure"
@@ -151,15 +196,15 @@ class CampaignResilienceService:
             campaign_title=campaign.title,
             reserve_capacity_percentage=reserve_percentage,
             campaign_accounts=len(items),
-            normal_daily_capacity=normal_total,
-            emergency_daily_capacity=emergency_total,
-            reserved_failover_headroom=max(emergency_total - normal_total, 0),
-            worst_single_account_loss_capacity=max_account,
-            n_minus_one_surviving_capacity=surviving,
-            n_minus_one_margin=margin,
-            n_minus_one_covered=covered,
-            resilience_ratio=ratio,
-            recommended_min_reserve_percentage=recommended,
+            normal_daily_capacity=summary.normal_daily_capacity,
+            emergency_daily_capacity=summary.emergency_daily_capacity,
+            reserved_failover_headroom=summary.reserved_failover_headroom,
+            worst_single_account_loss_capacity=summary.worst_single_account_loss_capacity,
+            n_minus_one_surviving_capacity=summary.n_minus_one_surviving_capacity,
+            n_minus_one_margin=summary.n_minus_one_margin,
+            n_minus_one_covered=summary.n_minus_one_covered,
+            resilience_ratio=summary.resilience_ratio,
+            recommended_min_reserve_percentage=summary.recommended_min_reserve_percentage,
             status=status,
             warnings=warnings,
             accounts=sorted(items, key=lambda item: item.emergency_daily_capacity, reverse=True),
