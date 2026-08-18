@@ -23,6 +23,11 @@ celery_app.conf.update(
             "schedule": 15.0,
             "args": (100,),
         },
+        "orchestration-finalize-execution-sla": {
+            "task": "orchestration.finalize_execution_sla",
+            "schedule": 3600.0,
+            "args": (250,),
+        },
         "learning-observe-engagement": {
             "task": "learning.observe_engagement",
             "schedule": 300.0,
