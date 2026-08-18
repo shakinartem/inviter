@@ -50,9 +50,13 @@ class SLAScenarioResponse(BaseModel):
     normal_daily_capacity: int
     emergency_daily_capacity: int
     reserved_headroom: int
+    required_daily_rate: int
+    supports_required_daily_rate: bool
     nominal_completion_days: float | None
-    modelled_completion_probability: float
-    conservative_completion_probability: float
+    modelled_schedule_continuity_probability: float
+    conservative_schedule_continuity_probability: float
+    modelled_workload_completion_probability: float
+    conservative_workload_completion_probability: float
     expected_actions_by_deadline: float
     conservative_expected_actions_by_deadline: float
     meets_target_sla: bool
@@ -66,6 +70,7 @@ class ExecutionSLAForecastResponse(BaseModel):
     campaign_title: str
     remaining_actions: int
     deadline_days: int
+    required_daily_rate: int
     deadline_at: datetime
     target_sla: float
     lookback_days: int
@@ -92,7 +97,7 @@ class ExecutionSLAForecastHistoryItem(BaseModel):
     evidence_quality: str
     current_reserve_percentage: float
     recommended_reserve_percentage: float | None
-    recommended_conservative_probability: float | None
+    recommended_conservative_continuity_probability: float | None
     normal_daily_capacity: int
     emergency_daily_capacity: int
     actual_completed_at: datetime | None
