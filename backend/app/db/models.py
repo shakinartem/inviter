@@ -13,6 +13,7 @@ from app.features.experiments.models import CampaignExperiment, ExperimentAssign
 from app.features.orchestration.destinations import CampaignDestination
 from app.features.orchestration.models import ActionJob
 from app.features.orchestration.adaptive_models import ActionAssignmentEvent
+from app.features.orchestration.sla_models import ExecutionSLAForecastSnapshot
 from app.features.segments.models import (
     AudienceSegment,
     AudienceSegmentMember,
@@ -43,6 +44,7 @@ __all__ = (
     "CampaignDestination",
     "ActionJob",
     "ActionAssignmentEvent",
+    "ExecutionSLAForecastSnapshot",
     "AudienceSegment",
     "AudienceSegmentMember",
     "CampaignAudienceSource",
