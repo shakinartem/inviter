@@ -22,8 +22,11 @@ from app.features.accounts.capacity_schemas import (
     AccountCapacityPoolResponse,
     AccountCapacityRefreshRequest,
     AccountRiskPolicyResponse,
+    AccountThroughputForecastRequest,
+    AccountThroughputForecastResponse,
 )
 from app.features.accounts.models import Account
+from app.features.accounts.throughput import AccountThroughputForecastService
 
 
 router = APIRouter(prefix="/account-capacity", tags=["account-capacity", "risk"])
@@ -67,6 +70,22 @@ async def refresh_capacity(
         ),
         assessments=[AccountCapacityAssessmentResponse(**item.public_dict()) for item in assessments],
     )
+
+
+@router.post("/forecast", response_model=AccountThroughputForecastResponse)
+async def forecast_throughput(
+    payload: AccountThroughputForecastRequest,
+    user=Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> AccountThroughputForecastResponse:
+    result = await AccountThroughputForecastService(session).forecast(
+        owner_id=user.id,
+        platform=payload.platform,
+        desired_actions=payload.desired_actions,
+        campaign_daily_limit=payload.campaign_daily_limit,
+        deadline_days=payload.deadline_days,
+    )
+    return AccountThroughputForecastResponse(**result)
 
 
 @router.get("/{account_id}/history", response_model=AccountCapacityHistoryResponse)
