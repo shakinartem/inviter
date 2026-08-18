@@ -18,6 +18,9 @@ class ProductRouterWiringTests(unittest.TestCase):
             "/segments/causal-portfolio/forecast",
             "/allocations/capacity-frontier",
             "/allocations/plans",
+            "/account-capacity/policy",
+            "/account-capacity/refresh",
+            "/account-capacity/forecast",
         }
         self.assertTrue(expected.issubset(paths), f"Missing routes: {sorted(expected - paths)}")
 
