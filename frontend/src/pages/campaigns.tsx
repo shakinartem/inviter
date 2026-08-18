@@ -46,6 +46,7 @@ export default function CampaignsPage() {
     source_segment_id: "",
     target_community_id: "",
     holdout_percentage: "10",
+    reserve_capacity_percentage: "0",
   });
 
   const experimentByCampaign = useMemo(
@@ -81,15 +82,29 @@ export default function CampaignsPage() {
     if (!form.title.trim() || !form.source_segment_id || !form.target_community_id) return;
     try {
       const holdout = Math.max(0, Math.min(50, Number(form.holdout_percentage) || 0));
+      const reserve = Math.max(0, Math.min(50, Number(form.reserve_capacity_percentage) || 0));
       await createCampaign.mutateAsync({
         title: form.title.trim(),
         source_segment_id: form.source_segment_id,
         target_community_id: form.target_community_id,
         holdout_percentage: holdout,
+        settings: {
+          reserve_capacity_percentage: reserve,
+        },
       });
-      setForm({ title: "", source_segment_id: "", target_community_id: "", holdout_percentage: "10" });
+      setForm({
+        title: "",
+        source_segment_id: "",
+        target_community_id: "",
+        holdout_percentage: "10",
+        reserve_capacity_percentage: "0",
+      });
       setShowCreate(false);
-      toast.success(holdout > 0 ? `Campaign created · ${holdout}% causal holdout configured` : "Campaign created without holdout");
+      const details = [
+        holdout > 0 ? `${holdout}% causal holdout` : "no holdout",
+        reserve > 0 ? `${reserve}% failover reserve` : "no failover reserve",
+      ].join(" · ");
+      toast.success(`Campaign created · ${details}`);
     } catch {
       toast.error("Failed to create campaign. Refresh the Opportunity and resync a private destination if needed.");
     }
@@ -107,12 +122,14 @@ export default function CampaignsPage() {
           min_readiness_score: 0,
         },
       });
+      const headroom = result.reserved_failover_headroom ?? 0;
+      const reserveText = headroom > 0 ? ` · ${headroom}/day failover headroom` : "";
       if (result.experiment_id) {
         toast.success(
-          `Campaign started · ${result.planned} actions · ${result.holdout_count ?? 0} randomized holdout`,
+          `Campaign started · ${result.planned} actions · ${result.holdout_count ?? 0} randomized holdout${reserveText}`,
         );
       } else {
-        toast.success(`Campaign started · ${result.planned} actions planned from frozen cohort`);
+        toast.success(`Campaign started · ${result.planned} actions planned from frozen cohort${reserveText}`);
       }
     } catch {
       toast.error("Could not start campaign. If a randomized experiment was already assigned, its original action budget is immutable.");
@@ -217,7 +234,7 @@ export default function CampaignsPage() {
                 </Button>
               )}
               {campaign.status === "draft" && (
-                <Button size="sm" variant="ghost" onClick={() => handleDelete(campaign.id)}>
+                <Button size="sm" variant="ghost" onClick={() => handleDeleteCampaign(campaign.id)}>
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               )}
@@ -228,6 +245,10 @@ export default function CampaignsPage() {
     ],
     [experimentByCampaign, startCampaign.isPending, pauseCampaign.isPending, stopCampaign.isPending],
   );
+
+  function handleDeleteCampaign(id: string) {
+    void handleDelete(id);
+  }
 
   const filteredCampaigns = (campaigns ?? []).filter((campaign) =>
     campaign.title.toLowerCase().includes(search.toLowerCase()),
@@ -268,7 +289,7 @@ export default function CampaignsPage() {
             <div>
               <h3 className="text-sm font-semibold text-ink">New Campaign</h3>
               <p className="mt-1 text-xs text-muted">
-                Opportunity + Destination → Action. A causal holdout receives no action and measures what would have happened anyway.
+                Opportunity + Destination → Action. Holdout measures causal lift; failover reserve protects execution capacity.
               </p>
             </div>
             <Button variant="outline" size="sm" onClick={handleSyncChats} disabled={syncChats.isPending}>
@@ -276,7 +297,7 @@ export default function CampaignsPage() {
               {syncChats.isPending ? "Syncing..." : "Sync my Telegram chats"}
             </Button>
           </div>
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-5">
             <input className="rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-accent" placeholder="Campaign title *" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
             <select className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-accent" value={form.source_segment_id} onChange={(event) => setForm({ ...form, source_segment_id: event.target.value })} disabled={segmentsLoading}>
               <option value="">Select Opportunity *</option>
@@ -290,9 +311,18 @@ export default function CampaignsPage() {
               Causal holdout %
               <input type="number" min={0} max={50} step={1} className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm normal-case text-ink" value={form.holdout_percentage} onChange={(event) => setForm({ ...form, holdout_percentage: event.target.value })} />
             </label>
+            <label className="space-y-1 text-[10px] font-medium uppercase tracking-wide text-muted">
+              Failover reserve %
+              <input type="number" min={0} max={50} step={1} className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm normal-case text-ink" value={form.reserve_capacity_percentage} onChange={(event) => setForm({ ...form, reserve_capacity_percentage: event.target.value })} />
+            </label>
           </div>
-          <div className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-muted">
-            <strong className="text-ink">Holdout is deliberate reach cost.</strong> At 10%, the platform expands the ranked experiment pool so the treatment group can still target the requested action budget when enough eligible people exist. Set 0% to disable causal measurement.
+          <div className="grid gap-2 md:grid-cols-2">
+            <div className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-muted">
+              <strong className="text-ink">Holdout is deliberate reach cost.</strong> At 10%, randomized units receive no action so downstream lift can be measured. Set 0% to disable causal measurement.
+            </div>
+            <div className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-muted">
+              <strong className="text-ink">Failover reserve is deliberate throughput headroom.</strong> Normal planning leaves this share unused; adaptive execution may consume it after hard account cooldown. Default 0% means no hidden throughput reduction.
+            </div>
           </div>
           {!segmentsLoading && availableSegments.length === 0 && (
             <p className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-muted">No materialized Telegram Opportunity yet. <Link to="/segments" className="font-medium text-ink underline">Create and refresh an Opportunity Segment</Link> first.</p>
