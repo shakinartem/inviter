@@ -8,6 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import get_current_active_user
 from app.db.session import get_db_session
 from app.features.orchestration.sla import ExecutionSLAForecastService
+from app.features.orchestration.sla_calibration import ExecutionSLACalibrationService
+from app.features.orchestration.sla_calibration_schemas import (
+    SLACalibrationResponse,
+    SLAFinalizationResponse,
+    SLALabelAuditItem,
+)
 from app.features.orchestration.sla_schemas import (
     ExecutionSLAForecastHistoryItem,
     ExecutionSLAForecastRequest,
@@ -38,6 +44,46 @@ async def forecast_execution_sla(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/finalize", response_model=SLAFinalizationResponse)
+async def finalize_mature_execution_sla_labels(
+    limit: int = Query(default=100, ge=1, le=1000),
+    user=Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> SLAFinalizationResponse:
+    return await ExecutionSLACalibrationService(session).finalize_mature_forecasts(
+        owner_id=user.id,
+        limit=limit,
+    )
+
+
+@router.get("/calibration", response_model=SLACalibrationResponse)
+async def execution_sla_calibration(
+    campaign_id: UUID | None = Query(default=None),
+    limit: int = Query(default=5000, ge=1, le=10000),
+    user=Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> SLACalibrationResponse:
+    return await ExecutionSLACalibrationService(session).calibration(
+        owner_id=user.id,
+        campaign_id=campaign_id,
+        limit=limit,
+    )
+
+
+@router.get("/labels", response_model=list[SLALabelAuditItem])
+async def execution_sla_label_audit(
+    campaign_id: UUID | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    user=Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[SLALabelAuditItem]:
+    return await ExecutionSLACalibrationService(session).label_audit(
+        owner_id=user.id,
+        campaign_id=campaign_id,
+        limit=limit,
+    )
 
 
 @router.get("/history", response_model=list[ExecutionSLAForecastHistoryItem])
