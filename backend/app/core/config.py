@@ -8,6 +8,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 ROOT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 
+def _looks_like_placeholder(value: str | None) -> bool:
+    normalized = (value or "").strip().lower().replace("-", "_")
+    return (
+        not normalized
+        or normalized in {"change_me", "changeme", "password", "secret"}
+        or normalized.startswith("change_me_")
+        or "example_secret" in normalized
+    )
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=ROOT_ENV_FILE,
@@ -39,6 +49,9 @@ class Settings(BaseSettings):
     postgres_db: str = Field(default="inviter", alias="POSTGRES_DB")
     postgres_user: str = Field(default="inviter", alias="POSTGRES_USER")
     postgres_password: str = Field(default="inviter", alias="POSTGRES_PASSWORD")
+    db_pool_size: int = Field(default=5, alias="DB_POOL_SIZE", ge=1, le=50)
+    db_max_overflow: int = Field(default=5, alias="DB_MAX_OVERFLOW", ge=0, le=100)
+    db_pool_recycle_seconds: int = Field(default=1800, alias="DB_POOL_RECYCLE_SECONDS", ge=60, le=86400)
 
     redis_host: str = Field(default="localhost", alias="REDIS_HOST")
     redis_port: int = Field(default=6379, alias="REDIS_PORT")
@@ -46,6 +59,7 @@ class Settings(BaseSettings):
     redis_db: int = Field(default=0, alias="REDIS_DB")
     celery_broker_db: int = Field(default=0, alias="CELERY_BROKER_DB")
     celery_result_db: int = Field(default=1, alias="CELERY_RESULT_DB")
+    redis_socket_timeout_seconds: float = Field(default=5.0, alias="REDIS_SOCKET_TIMEOUT_SECONDS", ge=0.5, le=60.0)
 
     cors_origins_raw: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173",
@@ -55,12 +69,18 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_runtime_security(self) -> "Settings":
         if self.environment.lower() in {"production", "prod"}:
-            if self.secret == "change-me" or len(self.secret) < 32:
-                raise ValueError("APP_SECRET must be a non-default value of at least 32 characters in production")
-            if not self.redis_password or len(self.redis_password) < 16:
-                raise ValueError("REDIS_PASSWORD must contain at least 16 characters in production")
-            if self.postgres_password == "inviter" or len(self.postgres_password) < 16:
+            if self.debug:
+                raise ValueError("APP_DEBUG must be false in production")
+            if _looks_like_placeholder(self.secret) or len(self.secret) < 32:
+                raise ValueError("APP_SECRET must be a non-placeholder value of at least 32 characters in production")
+            if _looks_like_placeholder(self.redis_password) or len(self.redis_password or "") < 16:
+                raise ValueError("REDIS_PASSWORD must be a non-placeholder value of at least 16 characters in production")
+            if _looks_like_placeholder(self.postgres_password) or self.postgres_password == "inviter" or len(self.postgres_password) < 16:
                 raise ValueError("POSTGRES_PASSWORD must be changed and contain at least 16 characters in production")
+            if "*" in self.allowed_hosts:
+                raise ValueError("APP_ALLOWED_HOSTS cannot contain '*' in production")
+            if any(origin == "*" for origin in self.cors_origins):
+                raise ValueError("APP_CORS_ORIGINS cannot contain '*' in production")
         return self
 
     @computed_field
