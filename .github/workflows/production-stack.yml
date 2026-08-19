@@ -13,7 +13,7 @@ permissions:
 jobs:
   production-compose:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -35,7 +35,7 @@ jobs:
           npm audit --omit=dev --audit-level=high
 
       - name: Validate shell scripts
-        run: bash -n deploy/validate-env.sh deploy/deploy.sh deploy/backup.sh deploy/restore.sh deploy/smoke-test.sh
+        run: bash -n deploy/validate-env.sh deploy/server-check.sh deploy/deploy.sh deploy/backup.sh deploy/restore.sh deploy/smoke-test.sh
 
       - name: Validate Compose configuration
         run: docker compose --env-file .env.production -f docker-compose.prod.yml config -q
@@ -160,6 +160,19 @@ jobs:
           (cd "$latest" && sha256sum -c SHA256SUMS)
           tar tzf "$latest/telegram-sessions.tar.gz" | grep -q 'ci-sentinel'
           IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend test -f /data/sessions/ci-sentinel
+          printf '%s\n' "$latest" > /tmp/qualive-latest-backup
+
+      - name: Drill PostgreSQL restore into an isolated database
+        run: |
+          latest="$(cat /tmp/qualive-latest-backup)"
+          IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T postgres dropdb -U inviter --if-exists ci_restore_verify
+          IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T postgres createdb -U inviter ci_restore_verify
+          cat "$latest/postgres.dump" | IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T postgres \
+            pg_restore -U inviter -d ci_restore_verify --no-owner --no-privileges --exit-on-error
+          version="$(IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T postgres \
+            psql -U inviter -d ci_restore_verify -Atc 'select version_num from alembic_version')"
+          test -n "$version"
+          IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T postgres dropdb -U inviter ci_restore_verify
 
       - name: Verify static frontend health
         run: IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T frontend wget -q -O - http://127.0.0.1/healthz
