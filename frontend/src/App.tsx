@@ -9,6 +9,7 @@ import AdaptiveExecutionPage from "@/pages/adaptive-execution";
 import ExecutionSLAPage from "@/pages/execution-sla";
 import ExecutionSLACalibrationPage from "@/pages/execution-sla-calibration";
 import SLAGovernancePage from "@/pages/sla-governance";
+import CampaignPreflightPage from "@/pages/campaign-preflight";
 import ConnectionsPage from "@/pages/connections";
 import ProxiesPage from "@/pages/proxies";
 import ParserPage from "@/pages/parser";
@@ -62,6 +63,7 @@ export default function App() {
             <Route path="execution-sla" element={<ExecutionSLAPage />} />
             <Route path="execution-sla-calibration" element={<ExecutionSLACalibrationPage />} />
             <Route path="sla-governance" element={<SLAGovernancePage />} />
+            <Route path="campaign-preflight" element={<CampaignPreflightPage />} />
             <Route path="proxies" element={<ProxiesPage />} />
             <Route path="parser" element={<ParserPage />} />
             <Route path="audience" element={<AudiencePage />} />
