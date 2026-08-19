@@ -6,6 +6,7 @@ from uuid import UUID
 from app.db.session import AsyncSessionLocal
 from app.features.connections.orchestration import ConnectionAwareOrchestrationService
 from app.features.orchestration.preflight_learning import CampaignPreflightLearningService
+from app.features.orchestration.recovery import recover_stale_action_jobs
 from app.features.orchestration.sla_calibration import ExecutionSLACalibrationService
 from app.tasks.celery_app import celery_app
 
@@ -20,6 +21,11 @@ async def _execute(job_id: UUID) -> dict:
     async with AsyncSessionLocal() as session:
         service = ConnectionAwareOrchestrationService(session)
         return await service.execute_job(job_id)
+
+
+async def _recover_stale_jobs() -> dict:
+    async with AsyncSessionLocal() as session:
+        return await recover_stale_action_jobs(session)
 
 
 async def _finalize_sla(limit: int) -> dict:
@@ -56,6 +62,12 @@ def execute_action_job(self, job_id: str) -> dict:
         return asyncio.run(_execute(UUID(job_id)))
     except Exception as exc:
         raise self.retry(exc=exc, countdown=30)
+
+
+@celery_app.task(name="orchestration.recover_stale_jobs")
+def recover_stale_jobs() -> dict:
+    """Repair safe dispatch leases and quarantine ambiguous in-flight crashes."""
+    return asyncio.run(_recover_stale_jobs())
 
 
 @celery_app.task(name="orchestration.finalize_execution_sla")
