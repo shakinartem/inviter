@@ -1,5 +1,6 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import type { CampaignPlanResult } from "@/hooks/use-campaigns";
 
 export type CampaignPreflightCheck = {
   key: string;
@@ -53,27 +54,56 @@ export type CampaignPreflight = {
   warnings: string[];
 };
 
+export type CampaignPreflightPayload = {
+  campaign_id: string;
+  action_budget: number;
+  deadline_days: number;
+  min_activity_score?: number;
+  min_readiness_score?: number;
+  account_ids?: string[] | null;
+};
+
+function requestBody(payload: CampaignPreflightPayload) {
+  const { campaign_id: _campaignId, ...body } = payload;
+  return {
+    min_activity_score: 0,
+    min_readiness_score: 0,
+    account_ids: null,
+    ...body,
+  };
+}
+
 export function useCampaignPreflight() {
   return useMutation({
-    mutationFn: async (payload: {
-      campaign_id: string;
-      action_budget: number;
-      deadline_days: number;
-      min_activity_score?: number;
-      min_readiness_score?: number;
-      account_ids?: string[] | null;
-    }) => {
-      const { campaign_id, ...body } = payload;
+    mutationFn: async (payload: CampaignPreflightPayload) => {
       const { data } = await apiClient.post<CampaignPreflight>(
-        `/orchestration/campaigns/${campaign_id}/preflight`,
-        {
-          min_activity_score: 0,
-          min_readiness_score: 0,
-          account_ids: null,
-          ...body,
-        },
+        `/orchestration/campaigns/${payload.campaign_id}/preflight`,
+        requestBody(payload),
       );
       return data;
+    },
+  });
+}
+
+export function useStartWithFreshPreflight() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: CampaignPreflightPayload) => {
+      const { data } = await apiClient.post<{
+        preflight: CampaignPreflight;
+        plan: CampaignPlanResult;
+      }>(
+        `/orchestration/campaigns/${payload.campaign_id}/preflight/start`,
+        requestBody(payload),
+      );
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["campaigns"] });
+      qc.invalidateQueries({ queryKey: ["campaign"] });
+      qc.invalidateQueries({ queryKey: ["campaign-action-stats"] });
+      qc.invalidateQueries({ queryKey: ["experiments"] });
+      qc.invalidateQueries({ queryKey: ["execution-events"] });
     },
   });
 }
