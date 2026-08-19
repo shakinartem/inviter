@@ -17,7 +17,14 @@ celery_app.conf.update(
     task_track_started=True,
     timezone=settings.timezone,
     broker_connection_retry_on_startup=True,
+    worker_prefetch_multiplier=1,
+    task_acks_late=False,
+    result_expires=3600,
     beat_schedule={
+        "orchestration-recover-stale-jobs": {
+            "task": "orchestration.recover_stale_jobs",
+            "schedule": 60.0,
+        },
         "orchestration-dispatch-due-jobs": {
             "task": "orchestration.dispatch_due",
             "schedule": 15.0,
