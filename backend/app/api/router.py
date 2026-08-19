@@ -27,6 +27,7 @@ from app.features.orchestration.adaptive_api import router as adaptive_execution
 from app.features.orchestration.execution_event_api import router as execution_event_router
 from app.features.orchestration.resilience_api import router as execution_resilience_router
 from app.features.orchestration.sla_api import router as execution_sla_router
+from app.features.orchestration.sla_governance_api import router as execution_sla_governance_router
 from app.features.orchestration.api import router as orchestration_router
 from app.features.orchestration.campaign_api import router as campaign_create_router
 from app.features.parser.api import router as parser_router
@@ -74,6 +75,7 @@ api_router.include_router(allocation_frontier_router, tags=["allocations", "capa
 api_router.include_router(allocations_router, tags=["allocations"])
 api_router.include_router(learning_router, tags=["learning"])
 api_router.include_router(outcome_webhook_router, tags=["learning", "outcome-webhooks"])
+api_router.include_router(execution_sla_governance_router, tags=["execution-sla", "model-governance"])
 api_router.include_router(execution_sla_router, tags=["execution-sla", "adaptive-execution"])
 api_router.include_router(execution_event_router, tags=["orchestration", "execution-events"])
 api_router.include_router(execution_resilience_router, tags=["adaptive-execution", "resilience"])
