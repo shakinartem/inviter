@@ -68,6 +68,10 @@ backend/alembic/versions/*.pyc
 *.bak
 backups/
 
+# Local deployment state
+.deploy-current
+.deploy-previous
+
 # Build output
 dist/
 build/
