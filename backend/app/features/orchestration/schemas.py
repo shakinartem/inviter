@@ -29,6 +29,14 @@ class CampaignPlanResponse(BaseModel):
     candidate_pool_size: int | None = None
     treatment_count: int | None = None
     holdout_count: int | None = None
+    risk_adjusted_accounts: int | None = None
+    risk_adjusted_daily_capacity: int | None = None
+    account_daily_capacities: dict[str, int] | None = None
+    reserve_capacity_percentage: float | None = None
+    normal_daily_capacity: int | None = None
+    emergency_daily_capacity: int | None = None
+    reserved_failover_headroom: int | None = None
+    normal_account_daily_capacities: dict[str, int] | None = None
 
 
 class ActionJobResponse(BaseModel):
