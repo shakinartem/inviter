@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.features.orchestration.schemas import CampaignPlanResponse
+
 
 class CampaignPreflightRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -65,3 +67,8 @@ class CampaignPreflightResponse(BaseModel):
     checks: list[CampaignPreflightCheck]
     accounts: list[CampaignPreflightAccount]
     warnings: list[str]
+
+
+class CampaignPreflightLaunchResponse(BaseModel):
+    preflight: CampaignPreflightResponse
+    plan: CampaignPlanResponse
