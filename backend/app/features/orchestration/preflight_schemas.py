@@ -72,3 +72,5 @@ class CampaignPreflightResponse(BaseModel):
 class CampaignPreflightLaunchResponse(BaseModel):
     preflight: CampaignPreflightResponse
     plan: CampaignPlanResponse
+    learning_snapshot_id: UUID | None = None
+    learning_snapshot_warning: str | None = None

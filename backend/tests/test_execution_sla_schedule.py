@@ -14,6 +14,14 @@ class ExecutionSLAScheduleTests(unittest.TestCase):
         self.assertEqual(float(item["schedule"]), 3600.0)
         self.assertEqual(tuple(item["args"]), (250,))
 
+    def test_mature_preflight_launches_are_finalized_hourly(self) -> None:
+        schedule = celery_app.conf.beat_schedule
+        self.assertIn("orchestration-finalize-preflight-decisions", schedule)
+        item = schedule["orchestration-finalize-preflight-decisions"]
+        self.assertEqual(item["task"], "orchestration.finalize_preflight_decisions")
+        self.assertEqual(float(item["schedule"]), 3600.0)
+        self.assertEqual(tuple(item["args"]), (250,))
+
 
 if __name__ == "__main__":
     unittest.main()
