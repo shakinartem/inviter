@@ -222,7 +222,7 @@ export function useExecutionSLALabels(campaignId: string | null = null, limit = 
 export function useFinalizeExecutionSLA() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (limit = 250) => {
+    mutationFn: async (limit: number = 250) => {
       const { data } = await apiClient.post<{
         examined: number;
         labeled: number;
