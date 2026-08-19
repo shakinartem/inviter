@@ -25,6 +25,7 @@ import {
   ArrowRightLeft,
   TimerReset,
   CheckCircle2,
+  SlidersHorizontal,
 } from "lucide-react";
 
 const navItems = [
@@ -52,6 +53,7 @@ const navItems = [
   { to: "/adaptive-execution", icon: ArrowRightLeft, label: "Adaptive Execution" },
   { to: "/execution-sla", icon: TimerReset, label: "Execution SLA" },
   { to: "/execution-sla-calibration", icon: CheckCircle2, label: "SLA Calibration" },
+  { to: "/sla-governance", icon: SlidersHorizontal, label: "SLA Governance" },
   { to: "/accounts", icon: Users, label: "Telegram Accounts" },
   { to: "/proxies", icon: Shield, label: "Proxies" },
   { to: "/settings", icon: Settings, label: "Settings" },
