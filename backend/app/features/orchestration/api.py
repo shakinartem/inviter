@@ -43,38 +43,32 @@ async def plan_campaign(
     return CampaignPlanResponse(**result)
 
 
-@router.post("/campaigns/{campaign_id}/start", response_model=CampaignPlanResponse)
+@router.post(
+    "/campaigns/{campaign_id}/start",
+    response_model=CampaignPlanResponse,
+    deprecated=True,
+)
 async def start_campaign(
     campaign_id: UUID,
     payload: CampaignPlanRequest,
     user=Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> CampaignPlanResponse:
-    service = ConnectionAwareOrchestrationService(session)
-    try:
-        result = await service.start_campaign(
-            owner_id=user.id,
-            campaign_id=campaign_id,
-            limit=payload.limit,
-            min_activity_score=payload.min_activity_score,
-            min_readiness_score=payload.min_readiness_score,
-            account_ids=payload.account_ids,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    await CampaignExecutionEventService(session).record(
-        owner_id=user.id,
-        campaign_id=campaign_id,
-        event_type="operator_start",
-        actor_type="operator",
-        actor_user_id=user.id,
-        details={
-            "requested_action_budget": payload.limit,
-            "planned": result.get("planned", 0),
-            "status": result.get("status", "active"),
+    """Deprecated public launch path.
+
+    All user-triggered campaign starts must pass the fresh server-side execution
+    preflight so decision-time evidence, account safety and launch learning cannot
+    be bypassed. Internal services may still call orchestration.start_campaign
+    behind the canonical preflight endpoint.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "PREFLIGHT_REQUIRED",
+            "message": "Direct campaign Start is disabled. Use the canonical fresh-preflight launch endpoint.",
+            "launch_endpoint": f"/orchestration/campaigns/{campaign_id}/preflight/start",
         },
     )
-    return CampaignPlanResponse(**result)
 
 
 @router.post("/campaigns/{campaign_id}/pause")
