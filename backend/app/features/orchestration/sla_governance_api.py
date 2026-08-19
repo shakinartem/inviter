@@ -12,7 +12,9 @@ from app.features.orchestration.sla_governance_schemas import (
     SLACalibratorResponse,
     SLACalibratorTrainRequest,
     SLACalibratorTrainResponse,
+    SLALiveMonitorResponse,
 )
+from app.features.orchestration.sla_live_monitoring import ExecutionSLALiveMonitoringService
 
 
 router = APIRouter(prefix="/execution-sla/calibrators", tags=["execution-sla", "model-governance"])
@@ -26,6 +28,20 @@ async def list_calibrators(
     session: AsyncSession = Depends(get_db_session),
 ) -> list[SLACalibratorResponse]:
     return await ExecutionSLAGovernanceService(session).list_calibrators(
+        owner_id=user.id,
+        base_model_version=base_model_version,
+        limit=limit,
+    )
+
+
+@router.get("/live-health", response_model=SLALiveMonitorResponse)
+async def live_calibrator_health(
+    base_model_version: str = Query(default="execution-sla-v1", max_length=64),
+    limit: int = Query(default=5000, ge=1, le=10000),
+    user=Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> SLALiveMonitorResponse:
+    return await ExecutionSLALiveMonitoringService(session).evaluate(
         owner_id=user.id,
         base_model_version=base_model_version,
         limit=limit,
