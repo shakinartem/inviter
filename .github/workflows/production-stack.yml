@@ -72,22 +72,15 @@ jobs:
             running="$(docker inspect -f '{{.State.Running}}' "$backend_id")"
             if [[ "$running" != "true" ]]; then
               docker logs "$backend_id" || true
-              echo "Backend container stopped before becoming healthy" >&2
               exit 1
             fi
             health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$backend_id")"
             echo "backend health attempt $attempt: $health"
-            if [[ "$health" == "healthy" ]]; then
-              exit 0
-            fi
-            if [[ "$health" == "unhealthy" ]]; then
-              docker logs "$backend_id" || true
-              exit 1
-            fi
+            [[ "$health" == "healthy" ]] && exit 0
+            [[ "$health" == "unhealthy" ]] && { docker logs "$backend_id" || true; exit 1; }
             sleep 2
           done
           docker logs "$backend_id" || true
-          echo "Backend did not become healthy in time" >&2
           exit 1
 
       - name: Verify deep backend readiness
@@ -126,12 +119,36 @@ jobs:
                   raise AssertionError(f'{url} unexpectedly reachable')
           PY
 
-      - name: Bootstrap admin and verify login
+      - name: Bootstrap production admin with CLI
         run: |
           IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend \
             python -m app.cli.create_admin --email ci-admin@example.invalid --password 'ci-admin-password-12345'
+
+      - name: Verify bootstrapped admin state in PostgreSQL
+        run: |
+          IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend python - <<'PY'
+          import asyncio
+          from sqlalchemy import select
+          from app.db.session import AsyncSessionLocal
+          from app.features.auth.models import User
+
+          async def main():
+              async with AsyncSessionLocal() as session:
+                  user = (await session.execute(select(User).where(User.email == 'ci-admin@example.invalid'))).scalar_one()
+                  assert user.is_active is True
+                  assert user.is_superuser is True
+                  assert user.is_verified is True
+                  assert user.hashed_password
+                  assert user.hashed_password != 'ci-admin-password-12345'
+                  print({'id': str(user.id), 'active': user.is_active, 'superuser': user.is_superuser, 'verified': user.is_verified})
+          asyncio.run(main())
+          PY
+
+      - name: Verify production JWT login
+        run: |
           IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend python - <<'PY'
           import json
+          import urllib.error
           import urllib.parse
           import urllib.request
           body = urllib.parse.urlencode({
@@ -144,8 +161,15 @@ jobs:
               headers={'Content-Type': 'application/x-www-form-urlencoded'},
               method='POST',
           )
-          payload = json.loads(urllib.request.urlopen(req, timeout=5).read())
-          assert payload.get('access_token')
+          try:
+              response = urllib.request.urlopen(req, timeout=5)
+              payload = json.loads(response.read())
+          except urllib.error.HTTPError as exc:
+              print('JWT login failed:', exc.code, exc.read().decode(errors='replace'))
+              raise
+          assert payload.get('access_token'), payload
+          assert payload.get('token_type') == 'bearer', payload
+          print({'token_type': payload['token_type'], 'access_token_present': True})
           PY
 
       - name: Verify Telegram session volume and backup snapshot
