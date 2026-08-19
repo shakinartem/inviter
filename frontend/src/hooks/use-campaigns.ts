@@ -12,6 +12,7 @@ export type CampaignActionStats = {
 
 export type CampaignPlanPayload = {
   limit?: number;
+  deadline_days?: number;
   min_activity_score?: number;
   min_readiness_score?: number;
   account_ids?: string[] | null;
@@ -113,14 +114,28 @@ export function useStartCampaign() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, payload }: { id: string; payload?: CampaignPlanPayload }) => {
-      const { data } = await apiClient.post<CampaignPlanResult>(`/orchestration/campaigns/${id}/start`, payload ?? {});
-      return data;
+      const body = {
+        action_budget: payload?.limit ?? 1000,
+        deadline_days: payload?.deadline_days ?? 7,
+        min_activity_score: payload?.min_activity_score ?? 0,
+        min_readiness_score: payload?.min_readiness_score ?? 0,
+        account_ids: payload?.account_ids ?? null,
+      };
+      const { data } = await apiClient.post<{
+        preflight: unknown;
+        plan: CampaignPlanResult;
+        learning_snapshot_id: string | null;
+        learning_snapshot_warning: string | null;
+      }>(`/orchestration/campaigns/${id}/preflight/start`, body);
+      return data.plan;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["campaigns"] });
       qc.invalidateQueries({ queryKey: ["campaign"] });
       qc.invalidateQueries({ queryKey: ["campaign-action-stats"] });
       qc.invalidateQueries({ queryKey: ["experiments"] });
+      qc.invalidateQueries({ queryKey: ["preflight-decision-history"] });
+      qc.invalidateQueries({ queryKey: ["preflight-decision-performance"] });
     },
   });
 }
