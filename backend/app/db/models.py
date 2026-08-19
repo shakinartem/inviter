@@ -14,6 +14,7 @@ from app.features.orchestration.destinations import CampaignDestination
 from app.features.orchestration.models import ActionJob
 from app.features.orchestration.adaptive_models import ActionAssignmentEvent
 from app.features.orchestration.execution_event_models import CampaignExecutionEvent
+from app.features.orchestration.preflight_models import CampaignPreflightDecision
 from app.features.orchestration.sla_models import ExecutionSLAForecastSnapshot
 from app.features.orchestration.sla_governance_models import ExecutionSLACalibrator
 from app.features.segments.models import (
@@ -47,6 +48,7 @@ __all__ = (
     "ActionJob",
     "ActionAssignmentEvent",
     "CampaignExecutionEvent",
+    "CampaignPreflightDecision",
     "ExecutionSLAForecastSnapshot",
     "ExecutionSLACalibrator",
     "AudienceSegment",
