@@ -56,6 +56,7 @@ class SLAScenarioResponse(BaseModel):
     modelled_schedule_continuity_probability: float
     conservative_schedule_continuity_probability: float
     modelled_workload_completion_probability: float
+    calibrated_workload_completion_probability: float | None = None
     conservative_workload_completion_probability: float
     expected_actions_by_deadline: float
     conservative_expected_actions_by_deadline: float
@@ -66,6 +67,7 @@ class SLAScenarioResponse(BaseModel):
 class ExecutionSLAForecastResponse(BaseModel):
     forecast_id: UUID | None
     model_version: str
+    active_calibrator_version: str | None = None
     campaign_id: UUID
     campaign_title: str
     remaining_actions: int
