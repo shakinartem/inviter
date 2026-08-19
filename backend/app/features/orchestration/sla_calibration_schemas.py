@@ -10,6 +10,7 @@ class SLAFinalizationResponse(BaseModel):
     examined: int
     labeled: int
     ineligible_queue: int
+    intervened: int
     still_pending: int
 
 
@@ -27,6 +28,7 @@ class SLACalibrationResponse(BaseModel):
     campaign_id: UUID | None
     labeled_samples: int
     ineligible_samples: int
+    intervened_samples: int
     pending_mature_samples: int
     mean_prediction: float | None
     observed_completion_rate: float | None

@@ -7,6 +7,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.features.accounts.capacity import HARD_COOLDOWN_CODES
+from app.features.orchestration.execution_event_models import CampaignExecutionEvent
+from app.features.orchestration.execution_events import CALIBRATION_CONFOUNDING_EVENTS
 from app.features.orchestration.models import ActionJob
 from app.features.orchestration.sla import MODEL_VERSION
 from app.features.orchestration.sla_calibration_schemas import (
@@ -127,6 +129,7 @@ class ExecutionSLACalibrationService:
         snapshots = list(result.scalars().all())
         labeled = 0
         ineligible = 0
+        intervened = 0
 
         for snapshot in snapshots:
             forecast_created_at = self._aware(snapshot.created_at)
@@ -168,6 +171,19 @@ class ExecutionSLACalibrationService:
                 )
             )).scalar() or 0)
 
+            intervention_result = await self.session.execute(
+                select(CampaignExecutionEvent)
+                .where(
+                    CampaignExecutionEvent.owner_id == snapshot.owner_id,
+                    CampaignExecutionEvent.campaign_id == snapshot.campaign_id,
+                    CampaignExecutionEvent.event_type.in_(CALIBRATION_CONFOUNDING_EVENTS),
+                    CampaignExecutionEvent.occurred_at > forecast_created_at,
+                    CampaignExecutionEvent.occurred_at <= deadline_at,
+                )
+                .order_by(CampaignExecutionEvent.occurred_at.asc())
+            )
+            interventions = list(intervention_result.scalars().all())
+
             snapshot.queue_eligible_at_forecast = queue_eligible
             snapshot.actual_successful_actions = actual_successes
             snapshot.actual_hard_failure_days = hard_days
@@ -183,6 +199,25 @@ class ExecutionSLACalibrationService:
                     "reason": "forecast_requested_more_actions_than_reconstructible_queue",
                 }
                 ineligible += 1
+                continue
+
+            if interventions:
+                snapshot.label_status = "intervened"
+                snapshot.actual_met_sla = None
+                snapshot.actual_completed_at = None
+                snapshot.label_notes = {
+                    "outstanding_jobs_at_forecast": outstanding_at_forecast,
+                    "required_remaining_actions": int(snapshot.remaining_actions),
+                    "reason": "operator_intervention_during_forecast_window",
+                    "events": [
+                        {
+                            "event_type": event.event_type,
+                            "occurred_at": self._aware(event.occurred_at).isoformat(),
+                        }
+                        for event in interventions[:50]
+                    ],
+                }
+                intervened += 1
                 continue
 
             met = actual_successes >= int(snapshot.remaining_actions)
@@ -204,15 +239,28 @@ class ExecutionSLACalibrationService:
                 "required_remaining_actions": int(snapshot.remaining_actions),
                 "label_semantics": "fixed_workload_completion_by_deadline",
                 "prediction_time_jobs_only": True,
+                "operator_intervention_free": True,
             }
             labeled += 1
 
         await self.session.commit()
+
+        remaining_clauses = [
+            ExecutionSLAForecastSnapshot.deadline_at <= now,
+            ExecutionSLAForecastSnapshot.label_status == "pending",
+        ]
+        if owner_id is not None:
+            remaining_clauses.append(ExecutionSLAForecastSnapshot.owner_id == owner_id)
+        still_pending = int((await self.session.execute(
+            select(func.count(ExecutionSLAForecastSnapshot.id)).where(*remaining_clauses)
+        )).scalar() or 0)
+
         return SLAFinalizationResponse(
             examined=len(snapshots),
             labeled=labeled,
             ineligible_queue=ineligible,
-            still_pending=0,
+            intervened=intervened,
+            still_pending=still_pending,
         )
 
     async def calibration(
@@ -240,11 +288,15 @@ class ExecutionSLACalibrationService:
         predictions: list[float] = []
         outcomes: list[int] = []
         ineligible = 0
+        intervened = 0
         pending_mature = 0
         now = datetime.now(timezone.utc)
         for row in rows:
             if row.label_status == "ineligible_queue":
                 ineligible += 1
+                continue
+            if row.label_status == "intervened":
+                intervened += 1
                 continue
             if row.label_status != "labeled" or row.actual_met_sla is None:
                 if self._aware(row.deadline_at) <= now:
@@ -269,12 +321,14 @@ class ExecutionSLACalibrationService:
 
         warnings = [
             "Calibration evaluates fixed-workload completion probability for the reserve active at forecast time; it does not label schedule continuity.",
-            "Manual pauses, destination changes or operator intervention are not yet separately modelled and may affect observed completion.",
+            "Forecasts with operator start/pause/stop/config intervention inside the prediction window are excluded from model scoring.",
         ]
         if samples < 20:
             warnings.append("Fewer than 20 mature eligible forecasts: do not tune the model from calibration metrics yet.")
         if ineligible:
             warnings.append(f"{ineligible} forecast(s) were excluded because the prediction-time queue was smaller than remaining_actions.")
+        if intervened:
+            warnings.append(f"{intervened} forecast(s) were excluded because operator intervention changed execution during the forecast window.")
         if pending_mature:
             warnings.append(f"{pending_mature} mature forecast(s) still need label finalization.")
 
@@ -283,6 +337,7 @@ class ExecutionSLACalibrationService:
             campaign_id=campaign_id,
             labeled_samples=samples,
             ineligible_samples=ineligible,
+            intervened_samples=intervened,
             pending_mature_samples=pending_mature,
             mean_prediction=metrics["mean_prediction"],
             observed_completion_rate=metrics["observed_completion_rate"],

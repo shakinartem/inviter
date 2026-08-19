@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import get_current_active_user
 from app.db.session import get_db_session
 from app.features.connections.orchestration import ConnectionAwareOrchestrationService
+from app.features.orchestration.execution_events import CampaignExecutionEventService
 from app.features.orchestration.schemas import (
     ActionJobListResponse,
     ActionJobResponse,
@@ -61,6 +62,18 @@ async def start_campaign(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    await CampaignExecutionEventService(session).record(
+        owner_id=user.id,
+        campaign_id=campaign_id,
+        event_type="operator_start",
+        actor_type="operator",
+        actor_user_id=user.id,
+        details={
+            "requested_action_budget": payload.limit,
+            "planned": result.get("planned", 0),
+            "status": result.get("status", "active"),
+        },
+    )
     return CampaignPlanResponse(**result)
 
 
@@ -73,6 +86,14 @@ async def pause_campaign(
     service = ConnectionAwareOrchestrationService(session)
     if not await service.pause_campaign(owner_id=user.id, campaign_id=campaign_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
+    await CampaignExecutionEventService(session).record(
+        owner_id=user.id,
+        campaign_id=campaign_id,
+        event_type="operator_pause",
+        actor_type="operator",
+        actor_user_id=user.id,
+        details={"status": "paused"},
+    )
     return {"success": True, "status": "paused"}
 
 
@@ -85,6 +106,14 @@ async def stop_campaign(
     service = ConnectionAwareOrchestrationService(session)
     if not await service.stop_campaign(owner_id=user.id, campaign_id=campaign_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
+    await CampaignExecutionEventService(session).record(
+        owner_id=user.id,
+        campaign_id=campaign_id,
+        event_type="operator_stop",
+        actor_type="operator",
+        actor_user_id=user.id,
+        details={"status": "completed"},
+    )
     return {"success": True, "status": "completed"}
 
 

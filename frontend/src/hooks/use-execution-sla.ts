@@ -87,6 +87,7 @@ export type SLACalibration = {
   campaign_id: string | null;
   labeled_samples: number;
   ineligible_samples: number;
+  intervened_samples: number;
   pending_mature_samples: number;
   mean_prediction: number | null;
   observed_completion_rate: number | null;
@@ -181,6 +182,7 @@ export function useFinalizeExecutionSLA() {
         examined: number;
         labeled: number;
         ineligible_queue: number;
+        intervened: number;
         still_pending: number;
       }>(`/execution-sla/finalize?limit=${limit}`);
       return data;
