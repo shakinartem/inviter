@@ -43,7 +43,12 @@ class CampaignPreflightResponse(BaseModel):
     decision: str
     action_budget_requested: int
     action_budget_executable: int
+    maximum_safe_action_budget: int
+    recommended_action_budget: int
+    budget_reduction_needed: bool
     deadline_days: int
+    recommended_deadline_days: int | None
+    deadline_extension_needed: bool
     required_daily_rate: int
     platform: str | None
     destination_title: str | None
