@@ -6,7 +6,7 @@ BACKUP_BEFORE_DEPLOY="${BACKUP_BEFORE_DEPLOY:-true}"
 SMOKE_RETRIES="${SMOKE_RETRIES:-30}"
 
 export ENV_FILE
-bash deploy/validate-env.sh
+bash deploy/server-check.sh
 
 set -a
 # shellcheck disable=SC1090
