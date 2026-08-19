@@ -25,6 +25,7 @@ from app.features.learning.api import router as learning_router
 from app.features.learning.webhook_api import router as outcome_webhook_router
 from app.features.orchestration.adaptive_api import router as adaptive_execution_router
 from app.features.orchestration.execution_event_api import router as execution_event_router
+from app.features.orchestration.preflight_api import router as execution_preflight_router
 from app.features.orchestration.resilience_api import router as execution_resilience_router
 from app.features.orchestration.sla_api import router as execution_sla_router
 from app.features.orchestration.sla_governance_api import router as execution_sla_governance_router
@@ -80,6 +81,7 @@ api_router.include_router(execution_sla_router, tags=["execution-sla", "adaptive
 api_router.include_router(execution_event_router, tags=["orchestration", "execution-events"])
 api_router.include_router(execution_resilience_router, tags=["adaptive-execution", "resilience"])
 api_router.include_router(adaptive_execution_router, tags=["adaptive-execution", "orchestration"])
+api_router.include_router(execution_preflight_router, tags=["orchestration", "preflight"])
 api_router.include_router(campaign_create_router, tags=["orchestration"])
 api_router.include_router(orchestration_router, tags=["orchestration"])
 api_router.include_router(proxies_router, tags=["proxies"])
