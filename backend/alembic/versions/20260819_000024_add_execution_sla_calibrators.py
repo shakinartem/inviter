@@ -52,9 +52,17 @@ def upgrade() -> None:
     op.create_index("ix_execution_sla_calibrators_trained_at", "execution_sla_calibrators", ["trained_at"])
     op.create_index("ix_execution_sla_calibrators_owner_status", "execution_sla_calibrators", ["owner_id", "status"])
     op.create_index("ix_execution_sla_calibrators_owner_model", "execution_sla_calibrators", ["owner_id", "base_model_version"])
+    op.create_index(
+        "uq_execution_sla_calibrators_active",
+        "execution_sla_calibrators",
+        ["owner_id", "base_model_version"],
+        unique=True,
+        postgresql_where=sa.text("status = 'active'"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("uq_execution_sla_calibrators_active", table_name="execution_sla_calibrators")
     op.drop_index("ix_execution_sla_calibrators_owner_model", table_name="execution_sla_calibrators")
     op.drop_index("ix_execution_sla_calibrators_owner_status", table_name="execution_sla_calibrators")
     op.drop_index("ix_execution_sla_calibrators_trained_at", table_name="execution_sla_calibrators")

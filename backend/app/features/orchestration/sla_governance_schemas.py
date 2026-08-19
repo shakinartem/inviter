@@ -56,3 +56,32 @@ class SLACalibratorApplyResponse(BaseModel):
     calibrator_version: str | None
     raw_probability: float
     calibrated_probability: float
+
+
+class SLALiveMonitorBucket(BaseModel):
+    lower_bound: float
+    upper_bound: float
+    samples: int
+    calibrated_mean_prediction: float | None
+    observed_completion_rate: float | None
+
+
+class SLALiveMonitorResponse(BaseModel):
+    base_model_version: str
+    active_calibrator_id: UUID | None
+    active_calibrator_version: str | None
+    activated_at: datetime | None
+    post_activation_labels: int
+    minimum_revalidation_samples: int
+    raw_brier: float | None
+    calibrated_brier: float | None
+    raw_ece: float | None
+    calibrated_ece: float | None
+    raw_bias: float | None
+    calibrated_bias: float | None
+    holdout_calibrated_brier: float | None
+    holdout_calibrated_ece: float | None
+    status: str
+    retirement_recommended: bool
+    warnings: list[str]
+    buckets: list[SLALiveMonitorBucket]

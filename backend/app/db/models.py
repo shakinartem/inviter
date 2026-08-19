@@ -15,6 +15,7 @@ from app.features.orchestration.models import ActionJob
 from app.features.orchestration.adaptive_models import ActionAssignmentEvent
 from app.features.orchestration.execution_event_models import CampaignExecutionEvent
 from app.features.orchestration.sla_models import ExecutionSLAForecastSnapshot
+from app.features.orchestration.sla_governance_models import ExecutionSLACalibrator
 from app.features.segments.models import (
     AudienceSegment,
     AudienceSegmentMember,
@@ -47,6 +48,7 @@ __all__ = (
     "ActionAssignmentEvent",
     "CampaignExecutionEvent",
     "ExecutionSLAForecastSnapshot",
+    "ExecutionSLACalibrator",
     "AudienceSegment",
     "AudienceSegmentMember",
     "CampaignAudienceSource",

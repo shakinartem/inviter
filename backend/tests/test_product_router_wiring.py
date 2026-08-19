@@ -29,8 +29,15 @@ class ProductRouterWiringTests(unittest.TestCase):
             "/execution-sla/forecast",
             "/execution-sla/finalize",
             "/execution-sla/calibration",
+            "/execution-sla/continuity-calibration",
             "/execution-sla/labels",
             "/execution-sla/history",
+            "/execution-sla/calibrators",
+            "/execution-sla/calibrators/live-health",
+            "/execution-sla/calibrators/train",
+            "/execution-sla/calibrators/{calibrator_id}/activate",
+            "/execution-sla/calibrators/{calibrator_id}/retire",
+            "/execution-events",
         }
         self.assertTrue(expected.issubset(paths), f"Missing routes: {sorted(expected - paths)}")
 

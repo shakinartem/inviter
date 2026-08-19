@@ -11,7 +11,7 @@ from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class ExecutionSLAForecastSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Prediction-time execution snapshot plus mature observed outcome label."""
+    """Prediction-time execution snapshot plus mature observed outcome labels."""
 
     __tablename__ = "execution_sla_forecasts"
 
@@ -38,10 +38,18 @@ class ExecutionSLAForecastSnapshot(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     input_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
     scenarios_snapshot: Mapped[list] = mapped_column(JSON, nullable=False)
 
-    # `actual_met_sla` calibrates fixed-workload completion probability for the
-    # CURRENT reserve scenario. It does not pretend to label schedule continuity.
+    # Fixed-workload completion label for the CURRENT reserve scenario.
     actual_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     actual_met_sla: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    # Forecast-relative schedule-continuity label. This is deliberately separate
+    # from fixed-workload completion so the two targets can be calibrated independently.
+    actual_met_continuity: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    continuity_windows_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    continuity_windows_met: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actual_continuity_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    continuity_label_notes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     label_status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, index=True)
     queue_eligible_at_forecast: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     actual_successful_actions: Mapped[int | None] = mapped_column(Integer, nullable=True)

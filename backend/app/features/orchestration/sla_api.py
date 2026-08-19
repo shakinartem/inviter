@@ -11,9 +11,11 @@ from app.features.orchestration.sla import ExecutionSLAForecastService
 from app.features.orchestration.sla_calibration import ExecutionSLACalibrationService
 from app.features.orchestration.sla_calibration_schemas import (
     SLACalibrationResponse,
+    SLAContinuityCalibrationResponse,
     SLAFinalizationResponse,
     SLALabelAuditItem,
 )
+from app.features.orchestration.sla_probability import apply_active_completion_calibration
 from app.features.orchestration.sla_schemas import (
     ExecutionSLAForecastHistoryItem,
     ExecutionSLAForecastRequest,
@@ -31,7 +33,7 @@ async def forecast_execution_sla(
     session: AsyncSession = Depends(get_db_session),
 ) -> ExecutionSLAForecastResponse:
     try:
-        return await ExecutionSLAForecastService(session).forecast(
+        forecast = await ExecutionSLAForecastService(session).forecast(
             owner_id=user.id,
             campaign_id=payload.campaign_id,
             remaining_actions=payload.remaining_actions,
@@ -41,6 +43,11 @@ async def forecast_execution_sla(
             reserve_percentages=payload.reserve_percentages,
             simulations=payload.simulations,
             persist_snapshot=payload.persist_snapshot,
+        )
+        return await apply_active_completion_calibration(
+            session,
+            owner_id=user.id,
+            forecast=forecast,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -66,6 +73,20 @@ async def execution_sla_calibration(
     session: AsyncSession = Depends(get_db_session),
 ) -> SLACalibrationResponse:
     return await ExecutionSLACalibrationService(session).calibration(
+        owner_id=user.id,
+        campaign_id=campaign_id,
+        limit=limit,
+    )
+
+
+@router.get("/continuity-calibration", response_model=SLAContinuityCalibrationResponse)
+async def execution_sla_continuity_calibration(
+    campaign_id: UUID | None = Query(default=None),
+    limit: int = Query(default=5000, ge=1, le=10000),
+    user=Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> SLAContinuityCalibrationResponse:
+    return await ExecutionSLACalibrationService(session).continuity_calibration(
         owner_id=user.id,
         campaign_id=campaign_id,
         limit=limit,

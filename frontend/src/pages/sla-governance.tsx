@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { CheckCircle2, FlaskConical, Power, ShieldCheck, TriangleAlert } from "lucide-react";
+import { Activity, CheckCircle2, FlaskConical, Power, ShieldCheck, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import {
   useActivateSLACalibrator,
   useRetireSLACalibrator,
   useSLACalibrators,
+  useSLALiveHealth,
   useTrainSLACalibrator,
 } from "@/hooks/use-sla-governance";
 
@@ -15,14 +16,20 @@ function delta(before: number, after: number) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(3)}`;
 }
 
+function metric(value: number | null) {
+  return value == null ? "—" : value.toFixed(3);
+}
+
 export default function SLAGovernancePage() {
   const calibrators = useSLACalibrators();
+  const live = useSLALiveHealth();
   const train = useTrainSLACalibrator();
   const activate = useActivateSLACalibrator();
   const retire = useRetireSLACalibrator();
 
   const items = useMemo(() => calibrators.data ?? [], [calibrators.data]);
   const active = items.find((item) => item.status === "active") ?? null;
+  const liveData = live.data;
 
   const trainNow = async () => {
     try {
@@ -63,7 +70,7 @@ export default function SLAGovernancePage() {
         <div>
           <h1 className="text-2xl font-semibold text-ink">SLA Model Governance</h1>
           <p className="mt-1 max-w-4xl text-sm text-muted">
-            Versioned probability calibration with chronological holdout validation. Candidates cannot activate on small samples or in-sample improvement alone.
+            Versioned point-probability calibration with chronological holdout validation and post-activation revalidation. Safety bounds and reserve policy never depend on this layer.
           </p>
         </div>
         <Button onClick={trainNow} disabled={train.isPending}>
@@ -75,7 +82,7 @@ export default function SLAGovernancePage() {
         <div className="rounded-xl border border-black/5 bg-white p-4 shadow-sm">
           <p className="text-xs uppercase tracking-wide text-muted">Production point forecast</p>
           <p className="mt-3 text-lg font-semibold text-ink">{active?.calibrator_version ?? "raw execution-sla-v1"}</p>
-          <p className="mt-1 text-xs text-muted">Safety bounds and reserve recommendations never use this calibration layer.</p>
+          <p className="mt-1 text-xs text-muted">Conservative continuity and capacity remain raw policy outputs.</p>
         </div>
         <div className="rounded-xl border border-black/5 bg-white p-4 shadow-sm">
           <p className="text-xs uppercase tracking-wide text-muted">Activation floor</p>
@@ -83,11 +90,32 @@ export default function SLAGovernancePage() {
           <p className="mt-1 text-xs text-muted">Newest 20% are held out chronologically.</p>
         </div>
         <div className="rounded-xl border border-black/5 bg-white p-4 shadow-sm">
-          <p className="text-xs uppercase tracking-wide text-muted">Governance rule</p>
-          <div className="mt-3 flex items-center gap-2 text-sm font-semibold text-ink"><ShieldCheck className="h-4 w-4" /> No worse holdout quality</div>
-          <p className="mt-1 text-xs text-muted">Brier, ECE and absolute bias must stay within strict tolerances.</p>
+          <p className="text-xs uppercase tracking-wide text-muted">Live revalidation</p>
+          <div className="mt-3 flex items-center gap-2 text-sm font-semibold text-ink"><Activity className="h-4 w-4" /> {liveData?.status ?? "loading"}</div>
+          <p className="mt-1 text-xs text-muted">Retirement can only be recommended after {liveData?.minimum_revalidation_samples ?? 50} unseen post-activation labels.</p>
         </div>
       </section>
+
+      {liveData && liveData.active_calibrator_version && (
+        <section className={`rounded-xl border p-5 shadow-sm ${liveData.retirement_recommended ? "border-red-200 bg-red-50" : liveData.status === "healthy" ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-semibold text-ink">Live post-activation evidence · {liveData.active_calibrator_version}</h2>
+              <p className="mt-1 text-xs text-muted">Only future intervention-clean labels produced by this exact calibrator version are scored.</p>
+            </div>
+            {liveData.retirement_recommended && liveData.active_calibrator_id && (
+              <Button variant="outline" size="sm" onClick={() => retireModel(liveData.active_calibrator_id!)} disabled={retire.isPending}>Retire degraded calibrator</Button>
+            )}
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            <div className="rounded-lg bg-white/70 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Fresh labels</p><p className="mt-1 text-xl font-semibold text-ink">{liveData.post_activation_labels}</p></div>
+            <div className="rounded-lg bg-white/70 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Brier raw → calibrated</p><p className="mt-1 font-semibold text-ink">{metric(liveData.raw_brier)} → {metric(liveData.calibrated_brier)}</p></div>
+            <div className="rounded-lg bg-white/70 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">ECE raw → calibrated</p><p className="mt-1 font-semibold text-ink">{metric(liveData.raw_ece)} → {metric(liveData.calibrated_ece)}</p></div>
+            <div className="rounded-lg bg-white/70 p-3"><p className="text-[10px] uppercase tracking-wide text-muted">Activation holdout</p><p className="mt-1 font-semibold text-ink">Brier {metric(liveData.holdout_calibrated_brier)} · ECE {metric(liveData.holdout_calibrated_ece)}</p></div>
+          </div>
+          <div className="mt-3 space-y-1 text-xs text-muted">{liveData.warnings.map((warning) => <p key={warning}>• {warning}</p>)}</div>
+        </section>
+      )}
 
       <section className="overflow-hidden rounded-xl border border-black/5 bg-white shadow-sm">
         <div className="border-b border-black/5 p-4">

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, JSON, String
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, JSON, String, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,4 +43,11 @@ class ExecutionSLACalibrator(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_execution_sla_calibrators_owner_status", "owner_id", "status"),
         Index("ix_execution_sla_calibrators_owner_model", "owner_id", "base_model_version"),
+        Index(
+            "uq_execution_sla_calibrators_active",
+            "owner_id",
+            "base_model_version",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
     )
