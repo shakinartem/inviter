@@ -43,6 +43,10 @@ def label_execution_continuity(
     remaining workload. Finishing early ends the obligation. Over-delivery can
     reduce future remaining workload but can never erase a previously missed
     window.
+
+    Continuity is deliberately independent from fixed-workload completion: a
+    workload may exceed available normal capacity yet still maintain its promised
+    cadence in every window. Completion-by-deadline is labeled separately.
     """
     start = _aware(forecast_created_at)
     deadline = _aware(deadline_at)
@@ -78,7 +82,7 @@ def label_execution_continuity(
 
     total = len(windows)
     met_count = sum(1 for item in windows if item.met)
-    met_continuity = remaining == 0 and total > 0 and met_count == total
+    met_continuity = (total == 0 and remaining == 0) or (total > 0 and met_count == total)
     rate = (met_count / total) if total else (1.0 if remaining == 0 else 0.0)
     return ContinuityLabel(
         met_continuity=met_continuity,
