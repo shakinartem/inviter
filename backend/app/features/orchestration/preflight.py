@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -15,6 +14,7 @@ from app.features.connectors.registry import connector_registry
 from app.features.experiments.service import CampaignExperimentService
 from app.features.inviter.models import InviteCampaign
 from app.features.orchestration.destinations import CampaignDestinationService
+from app.features.orchestration.preflight_math import recommend_preflight_budget
 from app.features.orchestration.preflight_schemas import (
     CampaignPreflightAccount,
     CampaignPreflightCheck,
@@ -26,12 +26,7 @@ from app.features.segments.models import CampaignAudienceSource
 
 
 class CampaignExecutionPreflightService:
-    """Produce a non-destructive launch decision from the exact frozen campaign inputs.
-
-    Preflight does not create experiment assignments or ActionJobs. It refreshes
-    deterministic account health, selects the currently safe account pool, and
-    returns that pool so Start can use the same accounts that were evaluated.
-    """
+    """Produce a launch decision from the exact frozen campaign inputs."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -215,6 +210,7 @@ class CampaignExecutionPreflightService:
                 "eligible_candidate_pool": eligible_candidate_pool,
                 "required_candidate_pool": required_candidate_pool,
                 "holdout_percentage": holdout_percentage,
+                "executable_treatment_actions": action_budget_executable,
             },
         )
 
@@ -269,11 +265,21 @@ class CampaignExecutionPreflightService:
         normal_total = sum(normal_caps)
         emergency_total = sum(emergency_caps)
         reserved_headroom = max(emergency_total - normal_total, 0)
-        required_daily_rate = math.ceil(action_budget / max(deadline_days, 1))
-        estimated_days = round(action_budget / normal_total, 2) if normal_total > 0 else None
+        budget_recommendation = recommend_preflight_budget(
+            requested_actions=action_budget,
+            executable_actions=action_budget_executable,
+            normal_daily_capacity=normal_total,
+            deadline_days=deadline_days,
+        )
+        required_daily_rate = budget_recommendation.required_daily_rate
+        estimated_days = budget_recommendation.estimated_completion_days
         max_emergency = max(emergency_caps, default=0)
         n_minus_one_surviving = max(emergency_total - max_emergency, 0)
-        n_minus_one_covers = len(emergency_caps) >= 2 and n_minus_one_surviving >= required_daily_rate
+        n_minus_one_covers = (
+            len(emergency_caps) >= 2
+            and required_daily_rate > 0
+            and n_minus_one_surviving >= required_daily_rate
+        )
 
         if not account_rows:
             self._add_check(
@@ -285,22 +291,42 @@ class CampaignExecutionPreflightService:
                 blocking=True,
             )
         else:
-            capacity_ok = normal_total >= required_daily_rate
+            capacity_ok = (
+                action_budget_executable > 0
+                and budget_recommendation.maximum_safe_action_budget >= action_budget_executable
+            )
+            if capacity_ok:
+                capacity_message = (
+                    f"Normal safe capacity is {normal_total}/day for the executable workload requirement of "
+                    f"{required_daily_rate}/day."
+                )
+            else:
+                deadline_hint = (
+                    f" or extend the horizon to at least {budget_recommendation.recommended_deadline_days} days"
+                    if budget_recommendation.recommended_deadline_days is not None
+                    else ""
+                )
+                capacity_message = (
+                    f"Only {budget_recommendation.maximum_safe_action_budget} of {action_budget_executable} executable actions "
+                    f"fit inside {deadline_days} days at normal safe capacity. Reduce the budget to "
+                    f"{budget_recommendation.recommended_action_budget}{deadline_hint}."
+                )
             self._add_check(
                 checks,
                 key="safe_capacity",
                 status="pass" if capacity_ok else "block",
                 title="Safe account capacity",
-                message=(
-                    f"Normal safe capacity is {normal_total}/day for required {required_daily_rate}/day."
-                    if capacity_ok
-                    else f"Required {required_daily_rate}/day exceeds normal safe capacity {normal_total}/day."
-                ),
+                message=capacity_message,
                 blocking=not capacity_ok,
                 details={
+                    "required_daily_rate": required_daily_rate,
+                    "normal_daily_capacity": normal_total,
                     "emergency_daily_capacity": emergency_total,
                     "reserved_failover_headroom": reserved_headroom,
                     "reserve_capacity_percentage": reserve_percentage,
+                    "maximum_safe_action_budget": budget_recommendation.maximum_safe_action_budget,
+                    "recommended_action_budget": budget_recommendation.recommended_action_budget,
+                    "recommended_deadline_days": budget_recommendation.recommended_deadline_days,
                 },
             )
 
@@ -356,7 +382,17 @@ class CampaignExecutionPreflightService:
         if quarantined_accounts:
             warnings.append(f"{quarantined_accounts} account(s) are currently excluded by account-risk policy.")
         if action_budget_executable < action_budget and action_budget_executable > 0:
-            warnings.append(f"Launch can execute at most {action_budget_executable} treatment actions from the current frozen cohort.")
+            warnings.append(
+                f"Frozen Opportunity supports {action_budget_executable} treatment actions versus {action_budget} requested."
+            )
+        if budget_recommendation.deadline_extension_needed:
+            warnings.append(
+                f"Current safe capacity needs at least {budget_recommendation.recommended_deadline_days} days for the executable workload."
+            )
+        if budget_recommendation.budget_reduction_needed:
+            warnings.append(
+                f"Maximum safe treatment budget for the current cohort/capacity/horizon is {budget_recommendation.recommended_action_budget}."
+            )
         if reserve_percentage <= 0:
             warnings.append("Campaign has 0% explicit failover reserve; N-1 safety depends entirely on unused physical capacity.")
 
@@ -370,7 +406,12 @@ class CampaignExecutionPreflightService:
             decision=decision,
             action_budget_requested=action_budget,
             action_budget_executable=action_budget_executable,
+            maximum_safe_action_budget=budget_recommendation.maximum_safe_action_budget,
+            recommended_action_budget=budget_recommendation.recommended_action_budget,
+            budget_reduction_needed=budget_recommendation.budget_reduction_needed,
             deadline_days=deadline_days,
+            recommended_deadline_days=budget_recommendation.recommended_deadline_days,
+            deadline_extension_needed=budget_recommendation.deadline_extension_needed,
             required_daily_rate=required_daily_rate,
             platform=platform,
             destination_title=(destination.title if destination else None),
