@@ -26,6 +26,7 @@ import {
   TimerReset,
   CheckCircle2,
   SlidersHorizontal,
+  ClipboardCheck,
 } from "lucide-react";
 
 const navItems = [
@@ -46,6 +47,7 @@ const navItems = [
   { to: "/capacity-allocation", icon: Layers3, label: "Capacity Allocation" },
   { to: "/capacity-economics", icon: Gauge, label: "Capacity Economics" },
   { to: "/campaigns", icon: Send, label: "Campaigns" },
+  { to: "/campaign-preflight", icon: ClipboardCheck, label: "Execution Preflight" },
   { to: "/learning", icon: BrainCircuit, label: "Learning" },
   { to: "/outcome-sources", icon: Webhook, label: "Outcome Sources" },
   { to: "/connections", icon: Cable, label: "Connections" },
