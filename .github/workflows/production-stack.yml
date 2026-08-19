@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "agent/**"
+      - "release/**"
   pull_request:
 
 permissions:
@@ -12,12 +13,19 @@ permissions:
 jobs:
   production-compose:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare production test env
-        run: cp .env.production.example .env.production
+      - name: Prepare valid CI-only production env
+        run: |
+          cp .env.production.example .env.production
+          sed -i 's/^APP_DOMAIN=.*/APP_DOMAIN=inviter-ci.invalid/' .env.production
+          sed -i 's/^APP_SECRET=.*/APP_SECRET=ci_app_secret_0123456789abcdef0123456789abcdef0123456789abcdef/' .env.production
+          sed -i 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci_postgres_0123456789abcdef0123456789/' .env.production
+          sed -i 's/^REDIS_PASSWORD=.*/REDIS_PASSWORD=ci_redis_abcdef0123456789abcdef012345/' .env.production
+          chmod 600 .env.production
+          bash deploy/validate-env.sh
 
       - name: Verify and audit production frontend dependencies
         working-directory: frontend
@@ -27,32 +35,40 @@ jobs:
           npm audit --omit=dev --audit-level=high
 
       - name: Validate shell scripts
-        run: bash -n deploy/backup.sh deploy/restore.sh deploy/smoke-test.sh
+        run: bash -n deploy/validate-env.sh deploy/deploy.sh deploy/backup.sh deploy/restore.sh deploy/smoke-test.sh
 
       - name: Validate Compose configuration
         run: docker compose --env-file .env.production -f docker-compose.prod.yml config -q
 
       - name: Validate Caddy configuration
-        run: docker run --rm -e APP_DOMAIN=inviter.example.com -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+        run: docker run --rm -e APP_DOMAIN=inviter-ci.invalid -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
 
       - name: Build production images
-        run: docker compose --env-file .env.production -f docker-compose.prod.yml build backend frontend
+        run: IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml build backend frontend
 
       - name: Start production core without public TLS edge
-        run: docker compose --env-file .env.production -f docker-compose.prod.yml up -d postgres redis migrate backend frontend
+        run: IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml up -d postgres redis migrate backend frontend celery_worker celery_beat
 
       - name: Verify migration service succeeded
         run: |
-          migrate_id="$(docker compose --env-file .env.production -f docker-compose.prod.yml ps -aq migrate)"
+          migrate_id="$(IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml ps -aq migrate)"
           test -n "$migrate_id"
-          test "$(docker inspect -f '{{.State.Status}}' "$migrate_id")" = "exited"
-          test "$(docker inspect -f '{{.State.ExitCode}}' "$migrate_id")" = "0"
+          for _ in $(seq 1 60); do
+            state="$(docker inspect -f '{{.State.Status}}' "$migrate_id")"
+            if [[ "$state" == "exited" ]]; then
+              test "$(docker inspect -f '{{.State.ExitCode}}' "$migrate_id")" = "0"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$migrate_id" || true
+          exit 1
 
       - name: Wait for backend readiness
         run: |
-          backend_id="$(docker compose --env-file .env.production -f docker-compose.prod.yml ps -q backend)"
+          backend_id="$(IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml ps -q backend)"
           test -n "$backend_id"
-          for attempt in $(seq 1 45); do
+          for attempt in $(seq 1 60); do
             running="$(docker inspect -f '{{.State.Running}}' "$backend_id")"
             if [[ "$running" != "true" ]]; then
               docker logs "$backend_id" || true
@@ -74,16 +90,31 @@ jobs:
           echo "Backend did not become healthy in time" >&2
           exit 1
 
-      - name: Verify backend health
-        run: docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read().decode())"
+      - name: Verify deep backend readiness
+        run: IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend python -c "import json, urllib.request; p=json.loads(urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5).read()); assert p['checks']=={'postgres':'ok','redis':'ok'}, p; print(p)"
+
+      - name: Verify worker readiness
+        run: |
+          worker_id="$(IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml ps -q celery_worker)"
+          test -n "$worker_id"
+          for attempt in $(seq 1 45); do
+            health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$worker_id")"
+            echo "worker health attempt $attempt: $health"
+            [[ "$health" == "healthy" ]] && exit 0
+            [[ "$health" == "unhealthy" ]] && { docker logs "$worker_id" || true; exit 1; }
+            sleep 2
+          done
+          docker logs "$worker_id" || true
+          exit 1
 
       - name: Verify production registration and docs are closed
         run: |
-          docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend python - <<'PY'
+          IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend python - <<'PY'
           import urllib.error
           import urllib.request
           for url in (
               'http://127.0.0.1:8000/docs',
+              'http://127.0.0.1:8000/openapi.json',
               'http://127.0.0.1:8000/api/v1/auth/register',
           ):
               req = urllib.request.Request(url, method='GET')
@@ -97,14 +128,14 @@ jobs:
 
       - name: Bootstrap admin and verify login
         run: |
-          docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend \
-            python -m app.cli.create_admin --email ci-admin@example.com --password 'ci-admin-password-12345'
-          docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend python - <<'PY'
+          IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend \
+            python -m app.cli.create_admin --email ci-admin@example.invalid --password 'ci-admin-password-12345'
+          IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend python - <<'PY'
           import json
           import urllib.parse
           import urllib.request
           body = urllib.parse.urlencode({
-              'username': 'ci-admin@example.com',
+              'username': 'ci-admin@example.invalid',
               'password': 'ci-admin-password-12345',
           }).encode()
           req = urllib.request.Request(
@@ -119,21 +150,25 @@ jobs:
 
       - name: Verify Telegram session volume and backup snapshot
         run: |
-          docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend sh -c "printf session-persistence-ok > /data/sessions/ci-sentinel"
-          bash deploy/backup.sh
+          printf 'ci\n' > .deploy-current
+          IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend sh -c "printf session-persistence-ok > /data/sessions/ci-sentinel"
+          IMAGE_TAG=ci bash deploy/backup.sh
           latest="$(ls -1dt backups/* | head -n 1)"
           test -f "$latest/postgres.dump"
           test -f "$latest/SHA256SUMS"
+          test -f "$latest/METADATA"
+          (cd "$latest" && sha256sum -c SHA256SUMS)
           tar tzf "$latest/telegram-sessions.tar.gz" | grep -q 'ci-sentinel'
-          docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend test -f /data/sessions/ci-sentinel
+          IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend test -f /data/sessions/ci-sentinel
 
       - name: Verify static frontend health
-        run: docker compose --env-file .env.production -f docker-compose.prod.yml exec -T frontend wget -q -O - http://127.0.0.1/healthz
+        run: IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T frontend wget -q -O - http://127.0.0.1/healthz
 
-      - name: Verify Postgres and Redis are not published
+      - name: Verify internal services are not published
         run: |
-          test -z "$(docker compose --env-file .env.production -f docker-compose.prod.yml port postgres 5432 2>/dev/null || true)"
-          test -z "$(docker compose --env-file .env.production -f docker-compose.prod.yml port redis 6379 2>/dev/null || true)"
+          test -z "$(IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml port postgres 5432 2>/dev/null || true)"
+          test -z "$(IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml port redis 6379 2>/dev/null || true)"
+          test -z "$(IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml port backend 8000 2>/dev/null || true)"
 
       - name: Package validated source from tracked files only
         run: git archive --format=zip --prefix=qualive-inviter/ -o qualive-inviter-production-ready.zip HEAD
@@ -144,12 +179,12 @@ jobs:
           name: qualive-inviter-production-ready
           path: qualive-inviter-production-ready.zip
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
 
       - name: Show logs on failure
         if: failure()
-        run: docker compose --env-file .env.production -f docker-compose.prod.yml logs --no-color
+        run: IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml logs --no-color
 
       - name: Cleanup
         if: always()
-        run: docker compose --env-file .env.production -f docker-compose.prod.yml down -v --remove-orphans
+        run: IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml down -v --remove-orphans
