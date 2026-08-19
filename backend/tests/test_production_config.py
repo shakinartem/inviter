@@ -12,30 +12,40 @@ class ProductionConfigTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             Settings(
                 APP_ENV="production",
+                APP_DEBUG=False,
                 APP_SECRET="change-me",
                 POSTGRES_PASSWORD="postgres-password-long-enough",
                 REDIS_PASSWORD="redis-password-long-enough",
+                APP_ALLOWED_HOSTS="inviter.example.test,backend",
+                APP_CORS_ORIGINS="https://inviter.example.test",
             )
 
     def test_production_rejects_short_redis_password(self) -> None:
         with self.assertRaises(ValidationError):
             Settings(
                 APP_ENV="production",
+                APP_DEBUG=False,
                 APP_SECRET="x" * 48,
                 POSTGRES_PASSWORD="postgres-password-long-enough",
                 REDIS_PASSWORD="short",
+                APP_ALLOWED_HOSTS="inviter.example.test,backend",
+                APP_CORS_ORIGINS="https://inviter.example.test",
             )
 
     def test_production_accepts_strong_runtime_secrets(self) -> None:
         settings = Settings(
             APP_ENV="production",
+            APP_DEBUG=False,
             APP_SECRET="a" * 48,
             POSTGRES_PASSWORD="postgres-password-long-enough",
             REDIS_PASSWORD="redis-password-long-enough",
             APP_ALLOW_REGISTRATION=False,
             APP_DOCS_ENABLED=False,
+            APP_ALLOWED_HOSTS="inviter.example.test,127.0.0.1,backend",
+            APP_CORS_ORIGINS="https://inviter.example.test",
             SESSIONS_DIR="/data/sessions",
         )
+        self.assertFalse(settings.debug)
         self.assertFalse(settings.allow_registration)
         self.assertFalse(settings.docs_enabled)
         self.assertEqual(settings.sessions_dir, "/data/sessions")
