@@ -3,8 +3,8 @@ import { CheckCircle2, Play, RefreshCw, ShieldAlert, TriangleAlert } from "lucid
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { useCampaignPreflight } from "@/hooks/use-campaign-preflight";
-import { useCampaigns, useStartCampaign } from "@/hooks/use-campaigns";
+import { useCampaignPreflight, useStartWithFreshPreflight } from "@/hooks/use-campaign-preflight";
+import { useCampaigns } from "@/hooks/use-campaigns";
 import { useExperiments } from "@/hooks/use-experiments";
 
 function decisionClasses(decision: string) {
@@ -17,7 +17,7 @@ export default function CampaignPreflightPage() {
   const { data: campaigns } = useCampaigns({ skip: 0, limit: 500 });
   const { data: experiments } = useExperiments();
   const preflight = useCampaignPreflight();
-  const startCampaign = useStartCampaign();
+  const launch = useStartWithFreshPreflight();
   const [campaignId, setCampaignId] = useState("");
   const [actionBudget, setActionBudget] = useState(1000);
   const [deadlineDays, setDeadlineDays] = useState(7);
@@ -30,14 +30,14 @@ export default function CampaignPreflightPage() {
     () => (experiments ?? []).find((item) => item.campaign_id === campaignId) ?? null,
     [experiments, campaignId],
   );
+  const currentBudget = experiment?.action_budget ?? actionBudget;
 
   const runPreflight = async () => {
     if (!campaignId) return toast.error("Select a campaign first.");
-    const budget = experiment?.action_budget ?? actionBudget;
     try {
       const result = await preflight.mutateAsync({
         campaign_id: campaignId,
-        action_budget: budget,
+        action_budget: currentBudget,
         deadline_days: deadlineDays,
       });
       if (result.decision === "go") toast.success("Preflight: GO");
@@ -48,23 +48,21 @@ export default function CampaignPreflightPage() {
     }
   };
 
-  const startWithPool = async () => {
-    const result = preflight.data;
-    if (!result || result.decision === "block") return;
+  const startWithFreshPreflight = async () => {
+    const preview = preflight.data;
+    if (!preview || preview.decision === "block") return;
     try {
-      const started = await startCampaign.mutateAsync({
-        id: result.campaign_id,
-        payload: {
-          limit: result.action_budget_requested,
-          min_activity_score: 0,
-          min_readiness_score: 0,
-          account_ids: result.recommended_account_ids,
-        },
+      const result = await launch.mutateAsync({
+        campaign_id: preview.campaign_id,
+        action_budget: currentBudget,
+        deadline_days: deadlineDays,
       });
-      toast.success(`Campaign started · ${started.planned} actions · evaluated account pool preserved`);
+      toast.success(
+        `Fresh preflight ${result.preflight.decision.toUpperCase()} · campaign started · ${result.plan.planned} actions`,
+      );
       preflight.reset();
     } catch {
-      toast.error("Launch failed. Run preflight again if campaign/account state changed.");
+      toast.error("Fresh server-side preflight blocked or launch state changed. Review and run preflight again.");
     }
   };
 
@@ -75,7 +73,7 @@ export default function CampaignPreflightPage() {
       <div>
         <h1 className="text-2xl font-semibold text-ink">Campaign Execution Preflight</h1>
         <p className="mt-1 max-w-4xl text-sm text-muted">
-          One launch decision over the frozen Opportunity, causal holdout, destination, risk-adjusted account pool, deadline capacity, N-1 resilience and production model health. Start reuses the exact account pool evaluated here.
+          One launch decision over the frozen Opportunity, causal holdout, destination, risk-adjusted account pool, deadline capacity, N-1 resilience and production model health. Start re-runs preflight server-side immediately before planning.
         </p>
       </div>
 
@@ -90,7 +88,7 @@ export default function CampaignPreflightPage() {
           </label>
           <label className="space-y-1 text-xs font-medium text-muted">
             Treatment action budget
-            <input type="number" min={1} max={50000} value={experiment?.action_budget ?? actionBudget} disabled={experiment?.status === "assigned"} onChange={(event) => setActionBudget(Math.max(1, Number(event.target.value) || 1))} className="block w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink disabled:bg-stone-50" />
+            <input type="number" min={1} max={50000} value={currentBudget} disabled={experiment?.status === "assigned"} onChange={(event) => setActionBudget(Math.max(1, Number(event.target.value) || 1))} className="block w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink disabled:bg-stone-50" />
             {experiment?.status === "assigned" && <span className="text-[10px] text-muted">Frozen by causal assignment.</span>}
           </label>
           <label className="space-y-1 text-xs font-medium text-muted">
@@ -103,8 +101,8 @@ export default function CampaignPreflightPage() {
             <RefreshCw className="mr-2 h-4 w-4" /> {preflight.isPending ? "Evaluating…" : "Run preflight"}
           </Button>
           {data && data.decision !== "block" && (
-            <Button variant="outline" onClick={startWithPool} disabled={startCampaign.isPending}>
-              <Play className="mr-2 h-4 w-4" /> {startCampaign.isPending ? "Starting…" : "Start with evaluated pool"}
+            <Button variant="outline" onClick={startWithFreshPreflight} disabled={launch.isPending}>
+              <Play className="mr-2 h-4 w-4" /> {launch.isPending ? "Rechecking & starting…" : "Fresh preflight & Start"}
             </Button>
           )}
         </div>
@@ -145,7 +143,7 @@ export default function CampaignPreflightPage() {
           </section>
 
           <section className="overflow-hidden rounded-xl border border-black/5 bg-white shadow-sm">
-            <div className="border-b border-black/5 p-4"><h2 className="text-sm font-semibold text-ink">Evaluated account pool</h2><p className="mt-1 text-xs text-muted">This exact pool is passed into Start so planning cannot silently switch to another account set.</p></div>
+            <div className="border-b border-black/5 p-4"><h2 className="text-sm font-semibold text-ink">Evaluated account pool</h2><p className="mt-1 text-xs text-muted">Launch re-runs the same policy immediately before Start and passes the freshly evaluated account IDs into the planner.</p></div>
             <div className="overflow-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-stone-50 text-xs text-muted"><tr><th className="px-3 py-2">Account</th><th className="px-3 py-2">Health</th><th className="px-3 py-2">Risk</th><th className="px-3 py-2">Normal/day</th><th className="px-3 py-2">Emergency/day</th><th className="px-3 py-2">Queued</th><th className="px-3 py-2">Signals</th></tr></thead><tbody>{data.accounts.map((account) => <tr key={account.account_id} className="border-t border-black/5"><td className="px-3 py-3 font-medium text-ink">{account.label}</td><td className="px-3 py-3">{account.health_score.toFixed(1)}</td><td className="px-3 py-3">{account.risk_score.toFixed(1)}</td><td className="px-3 py-3">{account.normal_daily_capacity}</td><td className="px-3 py-3">{account.emergency_daily_capacity}</td><td className="px-3 py-3">{account.queued_jobs}</td><td className="px-3 py-3 text-xs text-muted">{account.reasons.slice(0, 2).join(", ")}</td></tr>)}</tbody></table></div>
           </section>
 
