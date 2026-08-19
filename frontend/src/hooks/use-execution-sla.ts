@@ -24,6 +24,7 @@ export type SLAScenario = {
   modelled_schedule_continuity_probability: number;
   conservative_schedule_continuity_probability: number;
   modelled_workload_completion_probability: number;
+  calibrated_workload_completion_probability: number | null;
   conservative_workload_completion_probability: number;
   expected_actions_by_deadline: number;
   conservative_expected_actions_by_deadline: number;
@@ -34,6 +35,7 @@ export type SLAScenario = {
 export type ExecutionSLAForecast = {
   forecast_id: string | null;
   model_version: string;
+  active_calibrator_version: string | null;
   campaign_id: string;
   campaign_title: string;
   remaining_actions: number;
@@ -99,6 +101,32 @@ export type SLACalibration = {
   buckets: SLACalibrationBucket[];
 };
 
+export type SLAContinuityCalibrationBucket = {
+  lower_bound: number;
+  upper_bound: number;
+  samples: number;
+  mean_prediction: number | null;
+  observed_continuity_rate: number | null;
+  brier_score: number | null;
+};
+
+export type SLAContinuityCalibration = {
+  model_version: string;
+  campaign_id: string | null;
+  labeled_samples: number;
+  ineligible_samples: number;
+  intervened_samples: number;
+  pending_mature_samples: number;
+  mean_prediction: number | null;
+  observed_continuity_rate: number | null;
+  calibration_bias: number | null;
+  brier_score: number | null;
+  expected_calibration_error: number | null;
+  status: string;
+  warnings: string[];
+  buckets: SLAContinuityCalibrationBucket[];
+};
+
 export type SLALabelAudit = {
   id: string;
   campaign_id: string;
@@ -106,11 +134,16 @@ export type SLALabelAudit = {
   forecast_created_at: string;
   deadline_at: string;
   predicted_completion_probability: number | null;
+  predicted_continuity_probability: number | null;
   label_status: string;
   queue_eligible_at_forecast: boolean | null;
   actual_successful_actions: number | null;
   actual_hard_failure_days: number | null;
   actual_met_sla: boolean | null;
+  actual_met_continuity: boolean | null;
+  actual_continuity_rate: number | null;
+  continuity_windows_total: number | null;
+  continuity_windows_met: number | null;
   actual_completed_at: string | null;
   label_finalized_at: string | null;
 };
@@ -162,6 +195,18 @@ export function useExecutionSLACalibration(campaignId: string | null = null) {
   });
 }
 
+export function useExecutionSLAContinuityCalibration(campaignId: string | null = null) {
+  return useQuery({
+    queryKey: ["execution-sla-continuity-calibration", campaignId],
+    queryFn: async () => {
+      const { data } = await apiClient.get<SLAContinuityCalibration>("/execution-sla/continuity-calibration", {
+        params: campaignId ? { campaign_id: campaignId } : {},
+      });
+      return data;
+    },
+  });
+}
+
 export function useExecutionSLALabels(campaignId: string | null = null, limit = 50) {
   return useQuery({
     queryKey: ["execution-sla-labels", campaignId, limit],
@@ -189,8 +234,10 @@ export function useFinalizeExecutionSLA() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["execution-sla-calibration"] });
+      queryClient.invalidateQueries({ queryKey: ["execution-sla-continuity-calibration"] });
       queryClient.invalidateQueries({ queryKey: ["execution-sla-labels"] });
       queryClient.invalidateQueries({ queryKey: ["execution-sla-history"] });
+      queryClient.invalidateQueries({ queryKey: ["execution-sla-live-health"] });
     },
   });
 }
