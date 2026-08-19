@@ -5,6 +5,7 @@ from uuid import UUID
 
 from app.db.session import AsyncSessionLocal
 from app.features.connections.orchestration import ConnectionAwareOrchestrationService
+from app.features.orchestration.preflight_learning import CampaignPreflightLearningService
 from app.features.orchestration.sla_calibration import ExecutionSLACalibrationService
 from app.tasks.celery_app import celery_app
 
@@ -24,6 +25,15 @@ async def _execute(job_id: UUID) -> dict:
 async def _finalize_sla(limit: int) -> dict:
     async with AsyncSessionLocal() as session:
         result = await ExecutionSLACalibrationService(session).finalize_mature_forecasts(
+            owner_id=None,
+            limit=limit,
+        )
+        return result.model_dump(mode="json")
+
+
+async def _finalize_preflight_decisions(limit: int) -> dict:
+    async with AsyncSessionLocal() as session:
+        result = await CampaignPreflightLearningService(session).finalize_mature(
             owner_id=None,
             limit=limit,
         )
@@ -52,3 +62,9 @@ def execute_action_job(self, job_id: str) -> dict:
 def finalize_execution_sla(limit: int = 250) -> dict:
     """Label matured execution forecasts without blocking request workers."""
     return asyncio.run(_finalize_sla(limit))
+
+
+@celery_app.task(name="orchestration.finalize_preflight_decisions")
+def finalize_preflight_decisions(limit: int = 250) -> dict:
+    """Attach factual outcomes to matured launch-time preflight snapshots."""
+    return asyncio.run(_finalize_preflight_decisions(limit))
