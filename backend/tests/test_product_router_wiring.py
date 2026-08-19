@@ -27,6 +27,7 @@ class ProductRouterWiringTests(unittest.TestCase):
             "/adaptive-execution/events",
             "/adaptive-execution/resilience/{campaign_id}",
             "/orchestration/campaigns/{campaign_id}/preflight",
+            "/orchestration/campaigns/{campaign_id}/preflight/start",
             "/execution-sla/forecast",
             "/execution-sla/finalize",
             "/execution-sla/calibration",
