@@ -74,6 +74,25 @@ class ExecutionContinuityLabelTests(unittest.TestCase):
         self.assertTrue(label.met_continuity)
         self.assertEqual(label.windows[0].required_actions, 5)
 
+    def test_continuity_can_hold_even_when_workload_does_not_finish(self) -> None:
+        successes = [
+            self.start + timedelta(hours=1 + hour)
+            for hour in range(10)
+        ] + [
+            self.start + timedelta(days=1, hours=1 + hour)
+            for hour in range(10)
+        ]
+        label = label_execution_continuity(
+            forecast_created_at=self.start,
+            deadline_at=self.start + timedelta(days=2),
+            normal_daily_capacity=10,
+            remaining_actions=30,
+            successful_finished_at=successes,
+        )
+        self.assertTrue(label.met_continuity)
+        self.assertEqual(label.windows_met, 2)
+        self.assertEqual(label.remaining_actions_at_deadline, 10)
+
 
 if __name__ == "__main__":
     unittest.main()
