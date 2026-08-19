@@ -3,6 +3,7 @@ import { CheckCircle2, Play, RefreshCw, ShieldAlert, TriangleAlert } from "lucid
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { PreflightLearningPanel } from "@/components/preflight-learning-panel";
 import { useCampaignPreflight, useStartWithFreshPreflight } from "@/hooks/use-campaign-preflight";
 import { useCampaigns } from "@/hooks/use-campaigns";
 import { useExperiments } from "@/hooks/use-experiments";
@@ -60,6 +61,9 @@ export default function CampaignPreflightPage() {
       toast.success(
         `Fresh preflight ${result.preflight.decision.toUpperCase()} · campaign started · ${result.plan.planned} actions`,
       );
+      if (result.learning_snapshot_warning) {
+        toast.warning(result.learning_snapshot_warning);
+      }
       preflight.reset();
     } catch {
       toast.error("Fresh server-side preflight blocked or launch state changed. Review and run preflight again.");
@@ -154,6 +158,8 @@ export default function CampaignPreflightPage() {
           </div>
         </>
       )}
+
+      <PreflightLearningPanel />
     </div>
   );
 }
