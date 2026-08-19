@@ -40,6 +40,35 @@ export type SLACalibratorTrainResult = {
   warnings: string[];
 };
 
+export type SLALiveMonitorBucket = {
+  lower_bound: number;
+  upper_bound: number;
+  samples: number;
+  calibrated_mean_prediction: number | null;
+  observed_completion_rate: number | null;
+};
+
+export type SLALiveMonitor = {
+  base_model_version: string;
+  active_calibrator_id: string | null;
+  active_calibrator_version: string | null;
+  activated_at: string | null;
+  post_activation_labels: number;
+  minimum_revalidation_samples: number;
+  raw_brier: number | null;
+  calibrated_brier: number | null;
+  raw_ece: number | null;
+  calibrated_ece: number | null;
+  raw_bias: number | null;
+  calibrated_bias: number | null;
+  holdout_calibrated_brier: number | null;
+  holdout_calibrated_ece: number | null;
+  status: string;
+  retirement_recommended: boolean;
+  warnings: string[];
+  buckets: SLALiveMonitorBucket[];
+};
+
 export function useSLACalibrators() {
   return useQuery({
     queryKey: ["execution-sla-calibrators"],
@@ -47,6 +76,17 @@ export function useSLACalibrators() {
       const { data } = await apiClient.get<SLACalibrator[]>("/execution-sla/calibrators");
       return data;
     },
+  });
+}
+
+export function useSLALiveHealth() {
+  return useQuery({
+    queryKey: ["execution-sla-live-health"],
+    queryFn: async () => {
+      const { data } = await apiClient.get<SLALiveMonitor>("/execution-sla/calibrators/live-health");
+      return data;
+    },
+    refetchInterval: 60_000,
   });
 }
 
@@ -73,7 +113,10 @@ export function useActivateSLACalibrator() {
       const { data } = await apiClient.post<SLACalibrator>(`/execution-sla/calibrators/${id}/activate`);
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["execution-sla-calibrators"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["execution-sla-calibrators"] });
+      qc.invalidateQueries({ queryKey: ["execution-sla-live-health"] });
+    },
   });
 }
 
@@ -84,6 +127,9 @@ export function useRetireSLACalibrator() {
       const { data } = await apiClient.post<SLACalibrator>(`/execution-sla/calibrators/${id}/retire`);
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["execution-sla-calibrators"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["execution-sla-calibrators"] });
+      qc.invalidateQueries({ queryKey: ["execution-sla-live-health"] });
+    },
   });
 }
