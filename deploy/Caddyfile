@@ -10,7 +10,7 @@
         Strict-Transport-Security "max-age=31536000; includeSubDomains"
     }
 
-    @backend path /api/* /health
+    @backend path /api/* /health /health/*
     handle @backend {
         reverse_proxy backend:8000
     }
