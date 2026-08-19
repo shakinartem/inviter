@@ -7,7 +7,7 @@ x-backend-environment: &backend-environment
   APP_CORS_ORIGINS: https://${APP_DOMAIN:?APP_DOMAIN is required}
   APP_ALLOWED_HOSTS: ${APP_DOMAIN},127.0.0.1,localhost,backend
   APP_ALLOW_REGISTRATION: "false"
-  APP_DOCS_ENABLED: ${APP_DOCS_ENABLED:-false}
+  APP_DOCS_ENABLED: "false"
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   LOG_JSON: ${LOG_JSON:-true}
   POSTGRES_HOST: postgres
@@ -15,13 +15,23 @@ x-backend-environment: &backend-environment
   POSTGRES_DB: ${POSTGRES_DB:-inviter}
   POSTGRES_USER: ${POSTGRES_USER:-inviter}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+  DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+  DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-1800}
   REDIS_HOST: redis
   REDIS_PORT: 6379
   REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
   REDIS_DB: 0
+  REDIS_SOCKET_TIMEOUT_SECONDS: ${REDIS_SOCKET_TIMEOUT_SECONDS:-5}
   CELERY_BROKER_DB: 0
   CELERY_RESULT_DB: 1
   SESSIONS_DIR: /data/sessions
+
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${DOCKER_LOG_MAX_SIZE:-20m}
+    max-file: "${DOCKER_LOG_MAX_FILES:-5}"
 
 services:
   postgres:
@@ -41,13 +51,15 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    stop_grace_period: 60s
+    logging: *default-logging
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
-    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    command: ["sh", "-c", "exec redis-server --appendonly yes --appendfsync everysec --maxmemory-policy noeviction --requirepass \"$$REDIS_PASSWORD\""]
     volumes:
       - redis_data:/data
     networks:
@@ -58,6 +70,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 5s
+    stop_grace_period: 30s
+    logging: *default-logging
 
   migrate:
     image: qualive-inviter-backend:${IMAGE_TAG:-local}
@@ -74,6 +88,7 @@ services:
     networks:
       - core
     command: ["alembic", "upgrade", "head"]
+    logging: *default-logging
 
   backend:
     image: qualive-inviter-backend:${IMAGE_TAG:-local}
@@ -101,16 +116,17 @@ services:
       - --port
       - "8000"
       - --workers
-      - ${WEB_CONCURRENCY:-2}
+      - ${WEB_CONCURRENCY:-1}
       - --proxy-headers
       - --forwarded-allow-ips=*
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
       interval: 15s
       timeout: 5s
       retries: 10
       start_period: 20s
     stop_grace_period: 30s
+    logging: *default-logging
 
   celery_worker:
     image: qualive-inviter-backend:${IMAGE_TAG:-local}
@@ -124,8 +140,15 @@ services:
       - telegram_sessions:/data/sessions
     networks:
       - core
-    command: ["celery", "-A", "app.tasks.celery_app.celery_app", "worker", "--loglevel=${LOG_LEVEL:-INFO}", "--concurrency=${CELERY_CONCURRENCY:-2}"]
+    command: ["celery", "-A", "app.tasks.celery_app.celery_app", "worker", "--loglevel=${LOG_LEVEL:-INFO}", "--concurrency=${CELERY_CONCURRENCY:-1}"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app.celery_app inspect ping -d celery@$$HOSTNAME --timeout=5 2>/dev/null | grep -q pong"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     stop_grace_period: 60s
+    logging: *default-logging
 
   celery_beat:
     image: qualive-inviter-backend:${IMAGE_TAG:-local}
@@ -142,6 +165,7 @@ services:
       - core
     command: ["celery", "-A", "app.tasks.celery_app.celery_app", "beat", "--loglevel=${LOG_LEVEL:-INFO}", "--schedule=/data/celery/celerybeat-schedule"]
     stop_grace_period: 30s
+    logging: *default-logging
 
   frontend:
     image: qualive-inviter-frontend:${IMAGE_TAG:-local}
@@ -159,6 +183,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    logging: *default-logging
 
   caddy:
     image: caddy:2-alpine
@@ -186,6 +211,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    stop_grace_period: 30s
+    logging: *default-logging
 
 networks:
   edge:
