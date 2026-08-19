@@ -28,7 +28,12 @@ export type CampaignPreflight = {
   decision: "go" | "go_with_guards" | "block" | string;
   action_budget_requested: number;
   action_budget_executable: number;
+  maximum_safe_action_budget: number;
+  recommended_action_budget: number;
+  budget_reduction_needed: boolean;
   deadline_days: number;
+  recommended_deadline_days: number | null;
+  deadline_extension_needed: boolean;
   required_daily_rate: number;
   platform: string | null;
   destination_title: string | null;
