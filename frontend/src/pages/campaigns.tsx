@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { createColumnHelper } from "@tanstack/react-table";
-import { FlaskConical, Pause, Play, Plus, RefreshCw, Search, Square, Target, Trash2 } from "lucide-react";
+import { ClipboardCheck, FlaskConical, Pause, Plus, RefreshCw, Search, Square, Target, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ export default function CampaignsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState("");
   const [planLimit, setPlanLimit] = useState("1000");
+  const [deadlineDays, setDeadlineDays] = useState("7");
 
   const { data: campaigns, isLoading } = useCampaigns({ skip: 0, limit: 500 });
   const { data: experiments } = useExperiments();
@@ -118,6 +119,7 @@ export default function CampaignsPage() {
         id: campaign.id,
         payload: {
           limit: requestedLimit,
+          deadline_days: Math.min(90, Math.max(1, Number(deadlineDays) || 7)),
           min_activity_score: 0,
           min_readiness_score: 0,
         },
@@ -126,13 +128,13 @@ export default function CampaignsPage() {
       const reserveText = headroom > 0 ? ` · ${headroom}/day failover headroom` : "";
       if (result.experiment_id) {
         toast.success(
-          `Campaign started · ${result.planned} actions · ${result.holdout_count ?? 0} randomized holdout${reserveText}`,
+          `Preflight passed · campaign started · ${result.planned} actions · ${result.holdout_count ?? 0} randomized holdout${reserveText}`,
         );
       } else {
-        toast.success(`Campaign started · ${result.planned} actions planned from frozen cohort${reserveText}`);
+        toast.success(`Preflight passed · campaign started · ${result.planned} actions from frozen cohort${reserveText}`);
       }
     } catch {
-      toast.error("Could not start campaign. If a randomized experiment was already assigned, its original action budget is immutable.");
+      toast.error("Fresh execution preflight blocked launch or campaign state changed. Open Execution Preflight for the detailed decision.");
     }
   };
 
@@ -200,7 +202,7 @@ export default function CampaignsPage() {
               <p className="mt-0.5 text-[10px] text-muted">
                 {experiment.status === "assigned"
                   ? `${experiment.treatment_count} treatment · ${experiment.holdout_count} holdout · budget ${experiment.action_budget}`
-                  : "assigns on first Start"}
+                  : "assigns on first launch"}
               </p>
             </div>
           );
@@ -220,7 +222,7 @@ export default function CampaignsPage() {
             <div className="flex items-center gap-1">
               {(campaign.status === "draft" || campaign.status === "paused") && (
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => handleStart(campaign)}>
-                  <Play className="mr-1 h-3.5 w-3.5" /> Start
+                  <ClipboardCheck className="mr-1 h-3.5 w-3.5" /> Preflight & Start
                 </Button>
               )}
               {campaign.status === "active" && (
@@ -243,7 +245,7 @@ export default function CampaignsPage() {
         },
       }),
     ],
-    [experimentByCampaign, startCampaign.isPending, pauseCampaign.isPending, stopCampaign.isPending],
+    [experimentByCampaign, startCampaign.isPending, pauseCampaign.isPending, stopCampaign.isPending, planLimit, deadlineDays],
   );
 
   function handleDeleteCampaign(id: string) {
@@ -259,7 +261,7 @@ export default function CampaignsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-ink">Campaigns</h1>
-          <p className="mt-1 text-sm text-muted">Apply a frozen Opportunity cohort to a concrete destination and action.</p>
+          <p className="mt-1 text-sm text-muted">Apply a frozen Opportunity cohort to a destination through fresh execution preflight.</p>
         </div>
         <Button size="sm" onClick={() => setShowCreate(!showCreate)}>
           <Plus className="mr-1 h-4 w-4" /> New Campaign
@@ -267,19 +269,32 @@ export default function CampaignsPage() {
       </div>
 
       <div className="rounded-xl border border-black/5 bg-white p-4 shadow-sm">
-        <label className="block max-w-xs space-y-1 text-xs font-medium text-muted">
-          Max treatment actions to schedule
-          <input
-            className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-            type="number"
-            min={1}
-            max={50000}
-            value={planLimit}
-            onChange={(event) => setPlanLimit(event.target.value)}
-          />
-        </label>
+        <div className="grid max-w-2xl gap-3 md:grid-cols-2">
+          <label className="block space-y-1 text-xs font-medium text-muted">
+            Max treatment actions to schedule
+            <input
+              className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+              type="number"
+              min={1}
+              max={50000}
+              value={planLimit}
+              onChange={(event) => setPlanLimit(event.target.value)}
+            />
+          </label>
+          <label className="block space-y-1 text-xs font-medium text-muted">
+            Execution preflight horizon, days
+            <input
+              className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+              type="number"
+              min={1}
+              max={90}
+              value={deadlineDays}
+              onChange={(event) => setDeadlineDays(event.target.value)}
+            />
+          </label>
+        </div>
         <p className="mt-2 text-xs text-muted">
-          This becomes the immutable action budget when a randomized holdout is assigned. Paused experiments reuse their original budget automatically.
+          Every launch re-runs server-side Preflight against this workload and horizon before any ActionJobs are created. Assigned experiments keep their immutable treatment budget.
         </p>
       </div>
 
@@ -318,10 +333,10 @@ export default function CampaignsPage() {
           </div>
           <div className="grid gap-2 md:grid-cols-2">
             <div className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-muted">
-              <strong className="text-ink">Holdout is deliberate reach cost.</strong> At 10%, randomized units receive no action so downstream lift can be measured. Set 0% to disable causal measurement.
+              <strong className="text-ink">Holdout is deliberate reach cost.</strong> Randomized units receive no action so downstream lift can be measured. Set 0% to disable causal measurement.
             </div>
             <div className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-muted">
-              <strong className="text-ink">Failover reserve is deliberate throughput headroom.</strong> Normal planning leaves this share unused; adaptive execution may consume it after hard account cooldown. Default 0% means no hidden throughput reduction.
+              <strong className="text-ink">Failover reserve is deliberate throughput headroom.</strong> Normal planning leaves this share unused; adaptive execution may consume it after hard account cooldown.
             </div>
           </div>
           {!segmentsLoading && availableSegments.length === 0 && (
