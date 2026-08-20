@@ -3,26 +3,32 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
+import uuid
 
-from fastapi_users_db_sqlalchemy import SQLAlchemyUserDatabase
+from fastapi_users.password import PasswordHelper
 from sqlalchemy import select
 
-from app.core.security import UserManager
 from app.db import models as _models  # noqa: F401
 from app.db.session import AsyncSessionLocal
 from app.features.auth.models import User
-from app.features.auth.schemas import UserCreate
+
+
+_password_helper = PasswordHelper()
 
 
 async def create_admin(email: str, password: str) -> None:
-    """Create or promote an administrator using a direct CLI-safe DB lifecycle.
+    """Create or promote the first administrator with a CLI-owned DB lifecycle.
 
-    This deliberately does not manually drive FastAPI dependency generators.
-    The CLI owns one AsyncSession, constructs the FastAPI Users adapter directly,
-    and lets real exceptions propagate so deployment tooling never mistakes a
-    failed bootstrap for an existing user.
+    Bootstrap intentionally writes the FastAPI Users model directly instead of
+    constructing request-scoped FastAPI dependencies/UserManager objects. This
+    keeps the production bootstrap independent from ASGI dependency injection
+    while using the same FastAPI Users password hasher as normal authentication.
     """
     normalized_email = email.strip().lower()
+    if not normalized_email:
+        raise ValueError("Admin email must not be empty")
+    if len(password) < 12:
+        raise ValueError("Admin password must be at least 12 characters")
 
     async with AsyncSessionLocal() as session:
         try:
@@ -43,26 +49,23 @@ async def create_admin(email: str, password: str) -> None:
                     changed = True
 
                 if changed:
-                    session.add(existing)
                     await session.commit()
                     print(f"Promoted existing user to admin: {normalized_email}")
                 else:
                     print(f"Admin already exists: {normalized_email}")
                 return
 
-            user_db = SQLAlchemyUserDatabase(session, User)
-            manager = UserManager(user_db)
-            await manager.create(
-                UserCreate(
-                    email=normalized_email,
-                    password=password,
-                    is_active=True,
-                    is_superuser=True,
-                    is_verified=True,
-                ),
-                safe=False,
+            user = User(
+                id=uuid.uuid4(),
+                email=normalized_email,
+                hashed_password=_password_helper.hash(password),
+                is_active=True,
+                is_superuser=True,
+                is_verified=True,
             )
+            session.add(user)
             await session.commit()
+            await session.refresh(user)
             print(f"Created admin: {normalized_email}")
         except Exception:
             await session.rollback()
