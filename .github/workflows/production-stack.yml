@@ -129,6 +129,7 @@ jobs:
           IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml exec -T backend python - <<'PY'
           import asyncio
           from sqlalchemy import select
+          from app.db import models as _models  # noqa: F401 - register all ORM relationship targets
           from app.db.session import AsyncSessionLocal
           from app.features.auth.models import User
 
