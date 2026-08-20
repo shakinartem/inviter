@@ -32,19 +32,18 @@ if [[ "${ALLOW_CROSS_PROJECT_RESTORE:-false}" != "true" ]]; then
   [[ "$backup_db" == "${POSTGRES_DB:-inviter}" ]] || { echo "Backup database mismatch: $backup_db" >&2; exit 1; }
 fi
 
-release_tag=""
-if [[ -f .deploy-current ]]; then
+release_tag="${RELEASE_TAG:-}"
+if [[ -z "$release_tag" && -f .deploy-current ]]; then
   release_tag="$(tr -d '\r\n' < .deploy-current)"
 fi
 if [[ -z "$release_tag" ]]; then
   backend_id="$("${COMPOSE[@]}" ps -q backend 2>/dev/null || true)"
   if [[ -n "$backend_id" ]]; then
     image="$(docker inspect -f '{{.Config.Image}}' "$backend_id" 2>/dev/null || true)"
-    release_tag="${image##*:}"
+    [[ "$image" == qualive-inviter-backend:* ]] && release_tag="${image##*:}"
   fi
 fi
 [[ -n "$release_tag" ]] || { echo "Cannot determine deployed backend release tag. Set RELEASE_TAG explicitly." >&2; exit 1; }
-release_tag="${RELEASE_TAG:-$release_tag}"
 export IMAGE_TAG="$release_tag"
 
 echo "Stopping public/application services before destructive restore..."
