@@ -282,6 +282,7 @@ export interface InviteCampaignResponse {
   target_chat_title: string | null;
   target_chat_username: string | null;
   daily_limit_per_account: number;
+  reserve_capacity_percentage: number;
   invite_delay_min: number;
   invite_delay_max: number;
   pause_after_every: number;
@@ -318,6 +319,7 @@ export interface CampaignCreatePayload {
 
 export interface InviteSettingsPayload {
   daily_limit_per_account?: number;
+  reserve_capacity_percentage?: number;
   invite_delay_min?: number;
   invite_delay_max?: number;
   pause_after_every?: number;

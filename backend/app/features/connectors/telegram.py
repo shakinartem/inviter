@@ -1,0 +1,373 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+
+from telethon.errors import (
+    ChannelPrivateError,
+    ChatAdminRequiredError,
+    ChatWriteForbiddenError,
+    FloodWaitError,
+    InviteRequestSentError,
+    PeerFloodError,
+    UserAlreadyParticipantError,
+    UserBannedInChannelError,
+    UserIsBlockedError,
+    UserNotMutualContactError,
+    UserPrivacyRestrictedError,
+)
+from telethon.tl.functions.channels import InviteToChannelRequest
+from telethon.tl.functions.contacts import SearchRequest
+from telethon.tl.functions.messages import AddChatUserRequest
+from telethon.tl.types import (
+    Channel,
+    Chat,
+    InputChannel,
+    InputPeerChannel,
+    InputPeerChat,
+    InputUser,
+)
+
+from app.features.accounts.client_manager import TelegramClientManager
+from app.features.connectors.base import ConnectorCapabilities, MessengerConnector
+
+
+class TelegramConnector(MessengerConnector):
+    platform = "telegram"
+    display_name = "Telegram"
+    capabilities = ConnectorCapabilities(
+        connect_account=True,
+        discover_communities=True,
+        read_community=True,
+        read_messages=True,
+        read_members=True,
+        read_member_activity=True,
+        direct_invite=True,
+        invite_link=True,
+        direct_message=True,
+    )
+
+    def __init__(self, client_manager: TelegramClientManager | None = None) -> None:
+        self.client_manager = client_manager or TelegramClientManager()
+
+    async def check_account(self, account: Any) -> dict[str, Any]:
+        client = await self.client_manager.get_client(account)
+        try:
+            me = await client.get_me()
+            return {
+                "ok": True,
+                "external_account_id": str(me.id),
+                "username": getattr(me, "username", None),
+                "first_name": getattr(me, "first_name", None),
+            }
+        finally:
+            await self.client_manager.release_client(account.id)
+
+    @staticmethod
+    def _community_payload(chat: Channel | Chat) -> dict[str, Any]:
+        chat_type = "group"
+        if getattr(chat, "broadcast", False):
+            chat_type = "channel"
+        elif getattr(chat, "megagroup", False):
+            chat_type = "supergroup"
+
+        return {
+            "platform": "telegram",
+            "external_id": str(chat.id),
+            "username": getattr(chat, "username", None),
+            "title": getattr(chat, "title", None),
+            "type": chat_type,
+            "participants_count": getattr(chat, "participants_count", None),
+            "access_hash": (
+                str(getattr(chat, "access_hash"))
+                if getattr(chat, "access_hash", None) is not None
+                else None
+            ),
+            "raw": {
+                "verified": bool(getattr(chat, "verified", False)),
+                "scam": bool(getattr(chat, "scam", False)),
+                "fake": bool(getattr(chat, "fake", False)),
+            },
+        }
+
+    async def discover_communities(
+        self,
+        query: str,
+        *,
+        account: Any | None = None,
+        limit: int = 100,
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        if account is None:
+            raise ValueError("Telegram discovery requires an authorized account")
+
+        client = await self.client_manager.get_client(account)
+        try:
+            communities: list[dict[str, Any]] = []
+            normalized_query = query.strip()
+
+            if not normalized_query:
+                async for dialog in client.iter_dialogs(limit=min(max(limit, 1), 500)):
+                    chat = getattr(dialog, "entity", None)
+                    if not isinstance(chat, (Channel, Chat)):
+                        continue
+                    payload = self._community_payload(chat)
+                    if filters and filters.get("chat_type") and filters["chat_type"] != payload["type"]:
+                        continue
+                    communities.append(payload)
+                    if len(communities) >= limit:
+                        break
+                return communities
+
+            result = await client(SearchRequest(q=normalized_query, limit=min(max(limit, 1), 200)))
+            for chat in result.chats:
+                if not isinstance(chat, (Channel, Chat)):
+                    continue
+                payload = self._community_payload(chat)
+                if filters and filters.get("chat_type") and filters["chat_type"] != payload["type"]:
+                    continue
+                communities.append(payload)
+            return communities
+        finally:
+            await self.client_manager.release_client(account.id)
+
+    async def get_members(
+        self,
+        community: Any,
+        *,
+        account: Any,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        client = await self.client_manager.get_client(account)
+        try:
+            community_ref = self._readable_community_ref(community)
+            members: list[dict[str, Any]] = []
+            async for user in client.iter_participants(community_ref, limit=limit):
+                status = getattr(user, "status", None)
+                was_online = getattr(status, "was_online", None)
+                access_hash = getattr(user, "access_hash", None)
+                members.append(
+                    {
+                        "platform": self.platform,
+                        "external_user_id": str(user.id),
+                        "username": getattr(user, "username", None),
+                        "first_name": getattr(user, "first_name", None),
+                        "last_name": getattr(user, "last_name", None),
+                        "is_bot": bool(getattr(user, "bot", False)),
+                        "is_verified": bool(getattr(user, "verified", False)),
+                        "is_scam": bool(getattr(user, "scam", False)),
+                        "is_fake": bool(getattr(user, "fake", False)),
+                        "last_seen": was_online,
+                        "platform_data": {
+                            "access_hash": str(access_hash) if access_hash is not None else None,
+                        },
+                    }
+                )
+            return members
+        finally:
+            await self.client_manager.release_client(account.id)
+
+    async def get_recent_messages(
+        self,
+        community: Any,
+        *,
+        account: Any,
+        since: datetime,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+
+        client = await self.client_manager.get_client(account)
+        try:
+            community_ref = self._readable_community_ref(community)
+            messages: list[dict[str, Any]] = []
+            async for message in client.iter_messages(community_ref, limit=limit):
+                created_at = getattr(message, "date", None)
+                if created_at is None:
+                    continue
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                if created_at < since:
+                    break
+
+                sender_id = getattr(message, "sender_id", None)
+                messages.append(
+                    {
+                        "platform": self.platform,
+                        "external_message_id": str(message.id),
+                        "external_user_id": str(sender_id) if sender_id is not None else None,
+                        "created_at": created_at,
+                        "text": getattr(message, "message", None) or "",
+                        "is_reply": getattr(message, "reply_to_msg_id", None) is not None,
+                        "views": getattr(message, "views", None),
+                        "forwards": getattr(message, "forwards", None),
+                    }
+                )
+            return messages
+        finally:
+            await self.client_manager.release_client(account.id)
+
+    @staticmethod
+    def _readable_community_ref(value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        ref = value.strip()
+        if ref.startswith("channel:"):
+            parts = ref.split(":", 2)
+            if len(parts) != 3:
+                raise ValueError("Malformed Telegram channel reference")
+            return InputPeerChannel(channel_id=int(parts[1]), access_hash=int(parts[2]))
+        if ref.startswith("chat:"):
+            parts = ref.split(":", 1)
+            if len(parts) != 2:
+                raise ValueError("Malformed Telegram chat reference")
+            return InputPeerChat(chat_id=int(parts[1]))
+        return ref
+
+    @staticmethod
+    def _target_ref(value: str | int) -> str | int | InputUser:
+        if isinstance(value, int):
+            return value
+        ref = str(value).strip()
+        if ref.startswith("user:"):
+            parts = ref.split(":", 2)
+            if len(parts) != 3:
+                raise ValueError("Malformed Telegram user reference")
+            return InputUser(user_id=int(parts[1]), access_hash=int(parts[2]))
+        if ref.startswith("@"):
+            return ref
+        try:
+            return int(ref)
+        except ValueError:
+            return ref
+
+    @staticmethod
+    def _destination_ref(value: str | int) -> tuple[str, str | int | InputChannel]:
+        if isinstance(value, int):
+            return "auto", value
+        ref = str(value).strip()
+        if ref.startswith("channel:"):
+            parts = ref.split(":", 2)
+            if len(parts) != 3:
+                raise ValueError("Malformed Telegram channel reference")
+            return "channel", InputChannel(channel_id=int(parts[1]), access_hash=int(parts[2]))
+        if ref.startswith("chat:"):
+            parts = ref.split(":", 1)
+            if len(parts) != 2:
+                raise ValueError("Malformed Telegram chat reference")
+            return "chat", int(parts[1])
+        if ref.startswith("@"):
+            return "auto", ref
+        try:
+            return "auto", int(ref)
+        except ValueError:
+            return "auto", ref
+
+    async def execute_action(
+        self,
+        action: str,
+        *,
+        account: Any,
+        target: dict[str, Any],
+        destination: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if action != "direct_invite":
+            raise ValueError(f"Telegram action is not implemented yet: {action}")
+        if not destination or destination.get("external_id") is None:
+            raise ValueError("destination.external_id is required")
+        if target.get("external_user_id") is None:
+            raise ValueError("target.external_user_id is required")
+
+        client = await self.client_manager.get_client(account)
+        try:
+            try:
+                target_ref = self._target_ref(target.get("username") or target["external_user_id"])
+                if isinstance(target_ref, InputUser):
+                    target_entity = target_ref
+                else:
+                    target_entity = await client.get_entity(target_ref)
+
+                destination_value = destination.get("username") or destination["external_id"]
+                destination_kind, destination_ref = self._destination_ref(destination_value)
+
+                if destination_kind == "channel":
+                    await client(
+                        InviteToChannelRequest(
+                            channel=destination_ref,
+                            users=[target_entity],
+                        )
+                    )
+                elif destination_kind == "chat":
+                    await client(
+                        AddChatUserRequest(
+                            chat_id=int(destination_ref),
+                            user_id=target_entity,
+                            fwd_limit=0,
+                        )
+                    )
+                else:
+                    destination_entity = await client.get_entity(destination_ref)
+                    if isinstance(destination_entity, Channel):
+                        await client(
+                            InviteToChannelRequest(
+                                channel=destination_entity,
+                                users=[target_entity],
+                            )
+                        )
+                    elif isinstance(destination_entity, Chat):
+                        await client(
+                            AddChatUserRequest(
+                                chat_id=destination_entity.id,
+                                user_id=target_entity,
+                                fwd_limit=0,
+                            )
+                        )
+                    else:
+                        return {
+                            "ok": False,
+                            "action": action,
+                            "code": "UNSUPPORTED_DESTINATION",
+                            "retryable": False,
+                            "message": "Destination is not a Telegram group/channel",
+                        }
+
+                return {"ok": True, "action": action, "code": "INVITED"}
+            except UserAlreadyParticipantError:
+                return {"ok": True, "action": action, "code": "ALREADY_PARTICIPANT"}
+            except InviteRequestSentError:
+                return {"ok": True, "action": action, "code": "INVITE_REQUEST_SENT"}
+            except FloodWaitError as exc:
+                return {
+                    "ok": False,
+                    "action": action,
+                    "code": "FLOOD_WAIT",
+                    "retryable": True,
+                    "retry_after": int(exc.seconds),
+                    "message": str(exc),
+                }
+            except PeerFloodError as exc:
+                return {
+                    "ok": False,
+                    "action": action,
+                    "code": "PEER_FLOOD",
+                    "retryable": True,
+                    "retry_after": 3600,
+                    "message": str(exc),
+                }
+            except UserPrivacyRestrictedError as exc:
+                return {"ok": False, "action": action, "code": "PRIVACY_RESTRICTED", "retryable": False, "message": str(exc)}
+            except UserNotMutualContactError as exc:
+                return {"ok": False, "action": action, "code": "NOT_MUTUAL_CONTACT", "retryable": False, "message": str(exc)}
+            except ChatAdminRequiredError as exc:
+                return {"ok": False, "action": action, "code": "ADMIN_REQUIRED", "retryable": False, "message": str(exc)}
+            except ChannelPrivateError as exc:
+                return {"ok": False, "action": action, "code": "CHANNEL_PRIVATE", "retryable": False, "message": str(exc)}
+            except UserBannedInChannelError as exc:
+                return {"ok": False, "action": action, "code": "USER_BANNED", "retryable": False, "message": str(exc)}
+            except UserIsBlockedError as exc:
+                return {"ok": False, "action": action, "code": "USER_BLOCKED", "retryable": False, "message": str(exc)}
+            except ChatWriteForbiddenError as exc:
+                return {"ok": False, "action": action, "code": "WRITE_FORBIDDEN", "retryable": False, "message": str(exc)}
+        finally:
+            await self.client_manager.release_client(account.id)

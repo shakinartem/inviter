@@ -1,0 +1,234 @@
+name: ${COMPOSE_PROJECT_NAME:-qualive_inviter}
+
+x-backend-environment: &backend-environment
+  APP_ENV: production
+  APP_DEBUG: "false"
+  APP_SECRET: ${APP_SECRET:?APP_SECRET is required}
+  APP_CORS_ORIGINS: https://${APP_DOMAIN:?APP_DOMAIN is required}
+  APP_ALLOWED_HOSTS: ${APP_DOMAIN},127.0.0.1,localhost,backend
+  APP_ALLOW_REGISTRATION: "false"
+  APP_DOCS_ENABLED: "false"
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_JSON: ${LOG_JSON:-true}
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: ${POSTGRES_DB:-inviter}
+  POSTGRES_USER: ${POSTGRES_USER:-inviter}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+  DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+  DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-1800}
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+  REDIS_DB: 0
+  REDIS_SOCKET_TIMEOUT_SECONDS: ${REDIS_SOCKET_TIMEOUT_SECONDS:-5}
+  CELERY_BROKER_DB: 0
+  CELERY_RESULT_DB: 1
+  SESSIONS_DIR: /data/sessions
+
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${DOCKER_LOG_MAX_SIZE:-20m}
+    max-file: "${DOCKER_LOG_MAX_FILES:-5}"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-inviter}
+      POSTGRES_USER: ${POSTGRES_USER:-inviter}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - core
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-inviter} -d ${POSTGRES_DB:-inviter}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    stop_grace_period: 60s
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --appendfsync everysec --maxmemory-policy noeviction --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redis_data:/data
+    networks:
+      - core
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    stop_grace_period: 30s
+    logging: *default-logging
+
+  migrate:
+    image: qualive-inviter-backend:${IMAGE_TAG:-local}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    restart: "no"
+    environment: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - core
+    command: ["alembic", "upgrade", "head"]
+    logging: *default-logging
+
+  backend:
+    image: qualive-inviter-backend:${IMAGE_TAG:-local}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    init: true
+    environment: *backend-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - telegram_sessions:/data/sessions
+    networks:
+      - core
+      - edge
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --workers
+      - ${WEB_CONCURRENCY:-1}
+      - --proxy-headers
+      - --forwarded-allow-ips=*
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    stop_grace_period: 30s
+    logging: *default-logging
+
+  celery_worker:
+    image: qualive-inviter-backend:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    init: true
+    environment: *backend-environment
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - telegram_sessions:/data/sessions
+    networks:
+      - core
+    command: ["celery", "-A", "app.tasks.celery_app.celery_app", "worker", "--loglevel=${LOG_LEVEL:-INFO}", "--concurrency=${CELERY_CONCURRENCY:-1}"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app.celery_app inspect ping -d celery@$$HOSTNAME --timeout=5 2>/dev/null | grep -q pong"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    stop_grace_period: 60s
+    logging: *default-logging
+
+  celery_beat:
+    image: qualive-inviter-backend:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    init: true
+    environment: *backend-environment
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - telegram_sessions:/data/sessions
+      - celery_beat_data:/data/celery
+    networks:
+      - core
+    command: ["celery", "-A", "app.tasks.celery_app.celery_app", "beat", "--loglevel=${LOG_LEVEL:-INFO}", "--schedule=/data/celery/celerybeat-schedule"]
+    stop_grace_period: 30s
+    logging: *default-logging
+
+  frontend:
+    image: qualive-inviter-frontend:${IMAGE_TAG:-local}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: /api/v1
+    restart: unless-stopped
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging: *default-logging
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?APP_DOMAIN is required}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    stop_grace_period: 30s
+    logging: *default-logging
+
+networks:
+  edge:
+  core:
+    internal: true
+
+volumes:
+  postgres_data:
+    name: ${COMPOSE_PROJECT_NAME:-qualive_inviter}_postgres_data
+  redis_data:
+    name: ${COMPOSE_PROJECT_NAME:-qualive_inviter}_redis_data
+  telegram_sessions:
+    name: ${COMPOSE_PROJECT_NAME:-qualive_inviter}_telegram_sessions
+  celery_beat_data:
+    name: ${COMPOSE_PROJECT_NAME:-qualive_inviter}_celery_beat_data
+  caddy_data:
+    name: ${COMPOSE_PROJECT_NAME:-qualive_inviter}_caddy_data
+  caddy_config:
+    name: ${COMPOSE_PROJECT_NAME:-qualive_inviter}_caddy_config

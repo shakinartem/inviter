@@ -1,0 +1,36 @@
+name: Package source archive
+
+on:
+  push:
+    branches:
+      - agent/causal-evidence-health
+  pull_request:
+    branches:
+      - agent/capacity-economics-frontier
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Record archive metadata
+        run: |
+          printf 'branch=%s\ncommit=%s\nbuilt_at=%s\n' "${GITHUB_REF_NAME}" "${GITHUB_SHA}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > SOURCE_BUILD.txt
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualive-inviter-source
+          retention-days: 7
+          include-hidden-files: true
+          if-no-files-found: error
+          path: |
+            .env.example
+            .gitignore
+            .github
+            backend
+            frontend
+            docker-compose.yml
+            SOURCE_BUILD.txt

@@ -1,0 +1,13 @@
+[Unit]
+Description=Qualive Inviter verified backup
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/qualive-inviter
+Environment=ENV_FILE=/opt/qualive-inviter/.env.production
+ExecStart=/usr/bin/bash /opt/qualive-inviter/deploy/backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

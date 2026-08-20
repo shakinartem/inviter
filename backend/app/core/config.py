@@ -1,10 +1,21 @@
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+
+
+def _looks_like_placeholder(value: str | None) -> bool:
+    normalized = (value or "").strip().lower().replace("-", "_")
+    return (
+        not normalized
+        or normalized in {"change_me", "changeme", "password", "secret"}
+        or normalized.startswith("change_me_")
+        or "example_secret" in normalized
+    )
 
 
 class Settings(BaseSettings):
@@ -15,7 +26,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    project_name: str = "Self-Hosted Telegram Inviter Pro"
+    project_name: str = "Qualive Audience Intelligence"
     app_version: str = "0.1.0"
     environment: str = Field(default="development", alias="APP_ENV")
     debug: bool = Field(default=True, alias="APP_DEBUG")
@@ -26,6 +37,10 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     log_json: bool = Field(default=False, alias="LOG_JSON")
     api_v1_prefix: str = "/api/v1"
+    allow_registration: bool = Field(default=True, alias="APP_ALLOW_REGISTRATION")
+    docs_enabled: bool = Field(default=True, alias="APP_DOCS_ENABLED")
+    allowed_hosts_raw: str = Field(default="*", alias="APP_ALLOWED_HOSTS")
+    sessions_dir: str = Field(default="sessions", alias="SESSIONS_DIR")
     dev_admin_email: str = Field(default="admin@example.com", alias="DEV_ADMIN_EMAIL")
     dev_admin_password: str = Field(default="admin", alias="DEV_ADMIN_PASSWORD")
 
@@ -34,17 +49,39 @@ class Settings(BaseSettings):
     postgres_db: str = Field(default="inviter", alias="POSTGRES_DB")
     postgres_user: str = Field(default="inviter", alias="POSTGRES_USER")
     postgres_password: str = Field(default="inviter", alias="POSTGRES_PASSWORD")
+    db_pool_size: int = Field(default=5, alias="DB_POOL_SIZE", ge=1, le=50)
+    db_max_overflow: int = Field(default=5, alias="DB_MAX_OVERFLOW", ge=0, le=100)
+    db_pool_recycle_seconds: int = Field(default=1800, alias="DB_POOL_RECYCLE_SECONDS", ge=60, le=86400)
 
     redis_host: str = Field(default="localhost", alias="REDIS_HOST")
     redis_port: int = Field(default=6379, alias="REDIS_PORT")
+    redis_password: str | None = Field(default=None, alias="REDIS_PASSWORD")
     redis_db: int = Field(default=0, alias="REDIS_DB")
     celery_broker_db: int = Field(default=0, alias="CELERY_BROKER_DB")
     celery_result_db: int = Field(default=1, alias="CELERY_RESULT_DB")
+    redis_socket_timeout_seconds: float = Field(default=5.0, alias="REDIS_SOCKET_TIMEOUT_SECONDS", ge=0.5, le=60.0)
 
     cors_origins_raw: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173",
         alias="APP_CORS_ORIGINS",
     )
+
+    @model_validator(mode="after")
+    def validate_runtime_security(self) -> "Settings":
+        if self.environment.lower() in {"production", "prod"}:
+            if self.debug:
+                raise ValueError("APP_DEBUG must be false in production")
+            if _looks_like_placeholder(self.secret) or len(self.secret) < 32:
+                raise ValueError("APP_SECRET must be a non-placeholder value of at least 32 characters in production")
+            if _looks_like_placeholder(self.redis_password) or len(self.redis_password or "") < 16:
+                raise ValueError("REDIS_PASSWORD must be a non-placeholder value of at least 16 characters in production")
+            if _looks_like_placeholder(self.postgres_password) or self.postgres_password == "inviter" or len(self.postgres_password) < 16:
+                raise ValueError("POSTGRES_PASSWORD must be changed and contain at least 16 characters in production")
+            if "*" in self.allowed_hosts:
+                raise ValueError("APP_ALLOWED_HOSTS cannot contain '*' in production")
+            if any(origin == "*" for origin in self.cors_origins):
+                raise ValueError("APP_CORS_ORIGINS cannot contain '*' in production")
+        return self
 
     @computed_field
     @property
@@ -53,34 +90,44 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
+    def allowed_hosts(self) -> list[str]:
+        hosts = [host.strip() for host in self.allowed_hosts_raw.split(",") if host.strip()]
+        return hosts or ["*"]
+
+    @computed_field
+    @property
     def database_url(self) -> str:
-        return (
-            f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
-        )
+        user = quote(self.postgres_user, safe="")
+        password = quote(self.postgres_password, safe="")
+        database = quote(self.postgres_db, safe="")
+        return f"postgresql+asyncpg://{user}:{password}@{self.postgres_host}:{self.postgres_port}/{database}"
 
     @computed_field
     @property
     def sync_database_url(self) -> str:
-        return (
-            f"postgresql+psycopg://{self.postgres_user}:{self.postgres_password}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
-        )
+        user = quote(self.postgres_user, safe="")
+        password = quote(self.postgres_password, safe="")
+        database = quote(self.postgres_db, safe="")
+        return f"postgresql+psycopg://{user}:{password}@{self.postgres_host}:{self.postgres_port}/{database}"
+
+    def _redis_url(self, database: int) -> str:
+        auth = f":{quote(self.redis_password, safe='')}@" if self.redis_password else ""
+        return f"redis://{auth}{self.redis_host}:{self.redis_port}/{database}"
 
     @computed_field
     @property
     def redis_url(self) -> str:
-        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
+        return self._redis_url(self.redis_db)
 
     @computed_field
     @property
     def celery_broker_url(self) -> str:
-        return f"redis://{self.redis_host}:{self.redis_port}/{self.celery_broker_db}"
+        return self._redis_url(self.celery_broker_db)
 
     @computed_field
     @property
     def celery_result_backend(self) -> str:
-        return f"redis://{self.redis_host}:{self.redis_port}/{self.celery_result_db}"
+        return self._redis_url(self.celery_result_db)
 
 
 @lru_cache

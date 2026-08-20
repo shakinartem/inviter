@@ -1,6 +1,55 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import type { InviteCampaignListItem, InviteCampaignResponse, CampaignCreatePayload, CampaignStats, InviteTaskResponse } from "@/types";
+import type { InviteCampaignListItem, InviteCampaignResponse, InviteTaskResponse, InviteSettingsPayload } from "@/types";
+
+export type CampaignActionStats = {
+  campaign_id: string;
+  campaign_status: string;
+  total: number;
+  by_status: Record<string, number>;
+  success_rate: number;
+};
+
+export type CampaignPlanPayload = {
+  limit?: number;
+  deadline_days?: number;
+  min_activity_score?: number;
+  min_readiness_score?: number;
+  account_ids?: string[] | null;
+};
+
+export type CampaignPlanResult = {
+  campaign_id: string;
+  planned: number;
+  candidates: number;
+  accounts: number;
+  first_scheduled_at: string | null;
+  last_scheduled_at: string | null;
+  status?: string | null;
+  experiment_id?: string | null;
+  experiment_status?: string | null;
+  action_budget?: number | null;
+  candidate_pool_size?: number | null;
+  treatment_count?: number | null;
+  holdout_count?: number | null;
+  risk_adjusted_accounts?: number;
+  risk_adjusted_daily_capacity?: number;
+  account_daily_capacities?: Record<string, number>;
+  reserve_capacity_percentage?: number;
+  normal_daily_capacity?: number;
+  emergency_daily_capacity?: number;
+  reserved_failover_headroom?: number;
+  normal_account_daily_capacities?: Record<string, number>;
+};
+
+export type CanonicalCampaignCreatePayload = {
+  title: string;
+  target_community_id: string;
+  source_segment_id: string;
+  holdout_percentage?: number;
+  notes?: string | null;
+  settings?: InviteSettingsPayload;
+};
 
 export function useCampaigns(params?: { status?: string; skip?: number; limit?: number }) {
   return useQuery({
@@ -25,9 +74,9 @@ export function useCampaign(id: string | undefined) {
 
 export function useCampaignStats(id: string | undefined) {
   return useQuery({
-    queryKey: ["campaign-stats", id],
+    queryKey: ["campaign-action-stats", id],
     queryFn: async () => {
-      const { data } = await apiClient.get<CampaignStats>(`/campaigns/${id}/stats`);
+      const { data } = await apiClient.get<CampaignActionStats>(`/orchestration/campaigns/${id}/stats`);
       return data;
     },
     enabled: !!id,
@@ -50,24 +99,43 @@ export function useCampaignTasks(id: string | undefined) {
 export function useCreateCampaign() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: CampaignCreatePayload) => {
-      const { data } = await apiClient.post<InviteCampaignResponse>("/campaigns", payload);
+    mutationFn: async (payload: CanonicalCampaignCreatePayload) => {
+      const { data } = await apiClient.post<InviteCampaignResponse>("/orchestration/campaigns", payload);
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["campaigns"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["campaigns"] });
+      qc.invalidateQueries({ queryKey: ["experiments"] });
+    },
   });
 }
 
 export function useStartCampaign() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
-      const { data } = await apiClient.post(`/campaigns/${id}/start`);
-      return data;
+    mutationFn: async ({ id, payload }: { id: string; payload?: CampaignPlanPayload }) => {
+      const body = {
+        action_budget: payload?.limit ?? 1000,
+        deadline_days: payload?.deadline_days ?? 7,
+        min_activity_score: payload?.min_activity_score ?? 0,
+        min_readiness_score: payload?.min_readiness_score ?? 0,
+        account_ids: payload?.account_ids ?? null,
+      };
+      const { data } = await apiClient.post<{
+        preflight: unknown;
+        plan: CampaignPlanResult;
+        learning_snapshot_id: string | null;
+        learning_snapshot_warning: string | null;
+      }>(`/orchestration/campaigns/${id}/preflight/start`, body);
+      return data.plan;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["campaigns"] });
       qc.invalidateQueries({ queryKey: ["campaign"] });
+      qc.invalidateQueries({ queryKey: ["campaign-action-stats"] });
+      qc.invalidateQueries({ queryKey: ["experiments"] });
+      qc.invalidateQueries({ queryKey: ["preflight-decision-history"] });
+      qc.invalidateQueries({ queryKey: ["preflight-decision-performance"] });
     },
   });
 }
@@ -76,12 +144,13 @@ export function usePauseCampaign() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { data } = await apiClient.post(`/campaigns/${id}/pause`);
+      const { data } = await apiClient.post(`/orchestration/campaigns/${id}/pause`);
       return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["campaigns"] });
       qc.invalidateQueries({ queryKey: ["campaign"] });
+      qc.invalidateQueries({ queryKey: ["campaign-action-stats"] });
     },
   });
 }
@@ -90,12 +159,13 @@ export function useStopCampaign() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { data } = await apiClient.post(`/campaigns/${id}/stop`);
+      const { data } = await apiClient.post(`/orchestration/campaigns/${id}/stop`);
       return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["campaigns"] });
       qc.invalidateQueries({ queryKey: ["campaign"] });
+      qc.invalidateQueries({ queryKey: ["campaign-action-stats"] });
     },
   });
 }
@@ -106,6 +176,9 @@ export function useDeleteCampaign() {
     mutationFn: async (id: string) => {
       await apiClient.delete(`/campaigns/${id}`);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["campaigns"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["campaigns"] });
+      qc.invalidateQueries({ queryKey: ["experiments"] });
+    },
   });
 }
