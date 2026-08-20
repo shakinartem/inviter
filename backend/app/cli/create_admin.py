@@ -17,12 +17,18 @@ _password_helper = PasswordHelper()
 
 
 async def create_admin(email: str, password: str) -> None:
-    """Create or promote the first administrator with a CLI-owned DB lifecycle.
+    """Create or promote an administrator with a CLI-owned DB lifecycle.
 
     Bootstrap intentionally writes the FastAPI Users model directly instead of
     constructing request-scoped FastAPI dependencies/UserManager objects. This
     keeps the production bootstrap independent from ASGI dependency injection
     while using the same FastAPI Users password hasher as normal authentication.
+
+    Supplying a password is authoritative for this explicit administrative
+    operation: an existing account is promoted and its password is reset to the
+    supplied value. This prevents a bootstrap command from reporting success
+    while leaving the operator unable to authenticate with the password they
+    just provided.
     """
     normalized_email = email.strip().lower()
     if not normalized_email:
@@ -37,22 +43,12 @@ async def create_admin(email: str, password: str) -> None:
             ).scalar_one_or_none()
 
             if existing is not None:
-                changed = False
-                if not existing.is_active:
-                    existing.is_active = True
-                    changed = True
-                if not existing.is_verified:
-                    existing.is_verified = True
-                    changed = True
-                if not existing.is_superuser:
-                    existing.is_superuser = True
-                    changed = True
-
-                if changed:
-                    await session.commit()
-                    print(f"Promoted existing user to admin: {normalized_email}")
-                else:
-                    print(f"Admin already exists: {normalized_email}")
+                existing.is_active = True
+                existing.is_verified = True
+                existing.is_superuser = True
+                existing.hashed_password = _password_helper.hash(password)
+                await session.commit()
+                print(f"Promoted/reset admin credentials: {normalized_email}")
                 return
 
             user = User(
