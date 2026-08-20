@@ -204,9 +204,15 @@ jobs:
 
       - name: Verify internal services are not published
         run: |
-          test -z "$(IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml port postgres 5432 2>/dev/null || true)"
-          test -z "$(IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml port redis 6379 2>/dev/null || true)"
-          test -z "$(IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml port backend 8000 2>/dev/null || true)"
+          IMAGE_TAG=ci docker compose --env-file .env.production -f docker-compose.prod.yml ps -q postgres redis backend | while read -r container_id; do
+            test -n "$container_id"
+            docker inspect -f '{{json .NetworkSettings.Ports}}' "$container_id"
+            if docker inspect -f '{{range $port, $bindings := .NetworkSettings.Ports}}{{if $bindings}}{{range $bindings}}{{if .HostPort}}{{println $port .HostIp .HostPort}}{{end}}{{end}}{{end}}{{end}}' "$container_id" | grep -q .; then
+              echo "Internal service unexpectedly has a published host port: $container_id" >&2
+              docker inspect -f '{{json .NetworkSettings.Ports}}' "$container_id" >&2
+              exit 1
+            fi
+          done
 
       - name: Package validated source from tracked files only
         run: git archive --format=zip --prefix=qualive-inviter/ -o qualive-inviter-production-ready.zip HEAD
